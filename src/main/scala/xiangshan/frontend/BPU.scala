@@ -16,13 +16,13 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.experimental.chiselName
 import chisel3.util._
 import xiangshan._
 import utils._
 import xs.utils._
+import xs.utils.perf.HasPerfLogging
 
 import scala.math.min
 import scala.{Tuple2 => &}
@@ -171,7 +171,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
 }
 
 abstract class BasePredictor(implicit p: Parameters) extends XSModule
-  with HasBPUConst with BPUUtils with HasPerfEvents {
+  with HasBPUConst with BPUUtils with HasPerfEvents with HasPerfLogging {
   val meta_size = 0
   val spec_meta_size = 0
   val is_fast_pred = false
@@ -218,8 +218,9 @@ class PredictorIO(implicit p: Parameters) extends XSBundle {
   val ctrl = Input(new BPUCtrl)
 }
 
-@chiselName
-class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents with HasCircularQueuePtrHelper {
+
+class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends XSModule
+  with HasBPUConst with HasPerfEvents with HasCircularQueuePtrHelper with HasPerfLogging {
   val io = IO(new PredictorIO)
 
   val ctrl = DelayN(io.ctrl, 1)
@@ -515,7 +516,7 @@ class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends X
   s1_pred_info.zip(resp.s1.taken).map(tp => tp._1.taken := tp._2)
   s1_pred_info.zip(resp.s1.cfiIndex).map(tp => tp._1.cfiIndex := tp._2.bits)
 
-  val previous_s1_pred_info = RegEnable(s1_pred_info, init=0.U.asTypeOf(s1_pred_info), s1_fire_dup(0))
+  val previous_s1_pred_info = RegEnable(s1_pred_info, 0.U.asTypeOf(s1_pred_info), s1_fire_dup(0))
 
   val s2_redirect_s1_last_pred_vec_dup = preds_needs_redirect_vec_dup(previous_s1_pred_info, resp.s2)
 
@@ -587,7 +588,7 @@ class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends X
     )
   )
 
-  val previous_s2_pred = RegEnable(resp.s2, init=0.U.asTypeOf(resp.s2), s2_fire_dup(0))
+  val previous_s2_pred = RegEnable(resp.s2, 0.U.asTypeOf(resp.s2), s2_fire_dup(0))
 
   val s3_redirect_on_br_taken_dup = resp.s3.full_pred.zip(previous_s2_pred.full_pred).map {case (fp1, fp2) => fp1.real_br_taken_mask().asUInt =/= fp2.real_br_taken_mask().asUInt}
   val s3_redirect_on_target_dup = resp.s3.target.zip(previous_s2_pred.target).map {case (t1, t2) => t1 =/= t2}
@@ -650,7 +651,7 @@ class Predictor(parentName:String = "Unknown")(implicit p: Parameters) extends X
   val shift_dup = redirect_dup.map(_.cfiUpdate.shift)
   val addIntoHist_dup = redirect_dup.map(_.cfiUpdate.addIntoHist)
   // TODO: remove these below
-  val shouldShiftVec_dup = shift_dup.map(shift => Mux(shift === 0.U, VecInit(0.U((1 << (log2Ceil(numBr) + 1)).W).asBools), VecInit((LowerMask(1.U << (shift-1.U))).asBools())))
+  val shouldShiftVec_dup = shift_dup.map(shift => Mux(shift === 0.U, VecInit(0.U((1 << (log2Ceil(numBr) + 1)).W).asBools), VecInit((LowerMask(1.U << (shift-1.U))).asBools)))
   // TODO end
   val afhob_dup = redirect_dup.map(_.cfiUpdate.afhob)
   val lastBrNumOH_dup = redirect_dup.map(_.cfiUpdate.lastBrNumOH)

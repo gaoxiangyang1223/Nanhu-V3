@@ -19,7 +19,7 @@
  ****************************************************************************************/
 package xiangshan.backend.execute.exublock
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3.internal.sourceinfo.SourceInfo
 import xiangshan.backend.execute.exu.ExuConfig
 import xiangshan.backend.execute.exucx.{ExuComplexParam, ExuComplexWritebackNode}

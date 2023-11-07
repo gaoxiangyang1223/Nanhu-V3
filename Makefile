@@ -14,11 +14,14 @@
 # See the Mulan PSL v2 for more details.
 #***************************************************************************************
 
-TOP = XSTop
-SIM_TOP   = SimTop
+TOP = $(PREFIX)XSTop
+SIM_TOP   = $(PREFIX)SimTop
 FPGATOP = top.TopMain
 BUILD_DIR ?= ./build
+
 TOP_V = $(BUILD_DIR)/$(TOP).sv
+SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).sv
+
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 MEM_GEN = ./scripts/vlsi_mem_gen
@@ -59,17 +62,15 @@ ifeq ($(ENABLE_TOPDOWN),1)
 override SIM_ARGS += --enable-topdown
 endif
 
-# emu for the release version
-RELEASE_ARGS = --disable-all --fpga-platform
-DEBUG_ARGS   = --enable-difftest
-
-ifeq ($(VCS),1)
-RELEASE_ARGS += --emission-options disableRegisterRandomization -X sverilog --output-file $(TOP)
-DEBUG_ARGS += --emission-options disableRegisterRandomization -X sverilog --output-file $(SIM_TOP)
+ifdef PREFIX
+ARG_PREFIX = --prefix $(PREFIX)
 else
-RELEASE_ARGS += --emission-options disableRegisterRandomization -E verilog --output-file $(TOP)
-DEBUG_ARGS += -E verilog --output-file $(SIM_TOP)
+ARG_PREFIX =
 endif
+
+# emu for the release version
+RELEASE_ARGS = --fpga-platform --enable-difftest $(ARG_PREFIX)
+DEBUG_ARGS   = --enable-difftest $(ARG_PREFIX)
 
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
@@ -80,59 +81,51 @@ endif
 .DEFAULT_GOAL = verilog
 
 help:
-	mill -i XiangShan.test.runMain $(SIMTOP) --help
+	mill -i XiangShan.test.runMain $(SIMTOP) --xs-help
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
 	time -o $(@D)/time.log mill -i XiangShan.runMain $(FPGATOP) -td $(@D) \
 		--config $(CONFIG) --full-stacktrace --num-cores $(NUM_CORES) \
-		$(RELEASE_ARGS) | tee build/make.log
-	sed -e 's/\(peripheral\|memory\)_0_\(aw\|ar\|w\|r\|b\)_bits_/m_\1_\2_/g' \
-	-e 's/\(dma\)_0_\(aw\|ar\|w\|r\|b\)_bits_/s_\1_\2_/g' $@ > $(BUILD_DIR)/tmp.v
-	sed -e 's/\(peripheral\|memory\)_0_\(aw\|ar\|w\|r\|b\)_/m_\1_\2_/g' \
-	-e 's/\(dma\)_0_\(aw\|ar\|w\|r\|b\)_\(ready\|valid\)/s_\1_\2_\3/g' $(BUILD_DIR)/tmp.v > $(BUILD_DIR)/tmp1.v
-	rm $@ $(BUILD_DIR)/tmp.v
-	mv $(BUILD_DIR)/tmp1.v $@
-	@git log -n 1 >> .__head__
-	@git diff >> .__diff__
-	@sed -i 's/^/\/\// ' .__head__
-	@sed -i 's/^/\/\//' .__diff__
-	@cat .__head__ .__diff__ $@ > .__out__
-	@mv .__out__ $@
-	@rm .__head__ .__diff__
+		$(RELEASE_ARGS) --target systemverilog | tee build/make.log
+ifeq ($(VCS), 1)
+	@sed -i $$'s/$$fatal/assert(1\'b0)/g' $@
+else
+	@sed -i 's/$$fatal/xs_assert(`__LINE__)/g' $@
+endif
+	@python3 scripts/assertion_alter.py -o $@ $@
+	@sed -i "s/assign \([a-zA-Z0-9_]\+\) = .* ? \(.*\) : [0-9]\+'bx;/assign \1 = \2;/g" $@
+	@sed -i 's/_LOG_MODULE_PATH_/%m/g' $@
+	@sed -i 's/\(\b[a-zA-Z_0-9]\+_[0-9]\+x[0-9]\+\b\)/$(PREFIX)\1/g' $@
+	@sed -i '/\/\/ ----- 8< ----- FILE "firrtl_black_box_resource_files.f" ----- 8< -----/,$$d' $@
+	@sed -i -e 's/\(peripheral\|memory\)_0_\(aw\|ar\|w\|r\|b\)_bits_/m_\1_\2_/g' \
+	-e 's/\(dma\)_0_\(aw\|ar\|w\|r\|b\)_bits_/s_\1_\2_/g' $@
+	@sed -i -e 's/\(peripheral\|memory\)_0_\(aw\|ar\|w\|r\|b\)_/m_\1_\2_/g' \
+	-e 's/\(dma\)_0_\(aw\|ar\|w\|r\|b\)_\(ready\|valid\)/s_\1_\2_\3/g' $@
 
 verilog: $(TOP_V)
 
-SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).sv
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo "\n[mill] Generating Verilog files..." > $(@D)/time.log
 	@date -R | tee -a $(@D)/time.log
 	time -o $(@D)/time.log mill -i XiangShan.test.runMain $(SIMTOP) -td $(@D) \
 		--config $(CONFIG) --full-stacktrace --num-cores $(NUM_CORES) \
-		$(SIM_ARGS) | tee build/make.log
-
-ifeq ($(RELEASE),1)
+		$(SIM_ARGS) --target systemverilog | tee build/make.log
 ifeq ($(VCS), 1)
-	mv $(BUILD_DIR)/$(TOP).sv $(BUILD_DIR)/$(SIM_TOP).sv
+	@sed -i $$'s/$$fatal/assert(1\'b0)/g' $@
 else
-	mv $(BUILD_DIR)/$(TOP).v $(BUILD_DIR)/$(SIM_TOP).v
+	@sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $@
 endif
-endif
-
-ifneq ($(VCS), 1)
-	mv $(BUILD_DIR)/$(SIM_TOP).v $(SIM_TOP_V)
-	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
-endif
-	python3 scripts/assertion_alter.py -o $(SIM_TOP_V) $(SIM_TOP_V)
-
-	@git log -n 1 >> .__head__
-	@git diff >> .__diff__
-	@sed -i 's/^/\/\// ' .__head__
-	@sed -i 's/^/\/\//' .__diff__
-	@cat .__head__ .__diff__ $@ > .__out__
-	@mv .__out__ $@
-	@rm .__head__ .__diff__
+	@python3 scripts/assertion_alter.py -o $@ $@
+	@sed -i "s/assign \([a-zA-Z0-9_]\+\) = .* ? \(.*\) : [0-9]\+'bx;/assign \1 = \2;/g" $@
+	@sed -i 's/_LOG_MODULE_PATH_/%m/g' $@
+	@sed -i 's/\(\b[a-zA-Z_0-9]\+_[0-9]\+x[0-9]\+\b\)/$(PREFIX)\1/g' $@
+	@sed -i '/\/\/ ----- 8< ----- FILE "firrtl_black_box_resource_files.f" ----- 8< -----/,$$d' $@
+	@sed -i -e 's/\(peripheral\|memory\)_0_\(aw\|ar\|w\|r\|b\)_bits_/m_\1_\2_/g' \
+	-e 's/\(dma\)_0_\(aw\|ar\|w\|r\|b\)_bits_/s_\1_\2_/g' $@
+	@sed -i -e 's/\(peripheral\|memory\)_0_\(aw\|ar\|w\|r\|b\)_/m_\1_\2_/g' \
+	-e 's/\(dma\)_0_\(aw\|ar\|w\|r\|b\)_\(ready\|valid\)/s_\1_\2_\3/g' $@
 
 FILELIST := $(ABS_WORK_DIR)/build/cpu_flist.f
 
@@ -140,13 +133,17 @@ sim-verilog: $(SIM_TOP_V)
 	find $(ABS_WORK_DIR)/build -name "*.v" > $(FILELIST)
 	find $(ABS_WORK_DIR)/build -name "*.sv" >> $(FILELIST)
 
+comp:
+	mill -i XiangShan.compile
+	mill -i XiangShan.test.compile
+
 clean:
 	$(MAKE) -C ./difftest clean
 	rm -rf ./build
 
 init:
 	git submodule update --init
-	cd rocket-chip && git submodule update --init api-config-chipsalliance hardfloat
+	cd rocket-chip && git submodule update --init cde hardfloat
 
 bump:
 	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
@@ -155,7 +152,7 @@ bsp:
 	mill -i mill.bsp.BSP/install
 
 idea:
-	mill -i mill.scalalib.GenIdea/idea
+	mill -i mill.idea.GenIdea/idea
 
 # verilator simulation
 emu:
@@ -164,11 +161,10 @@ emu:
 emu_rtl:
 	$(MAKE) -C ./difftest emu_rtl SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) EMU_TRACE=1 EMU_THREADS=8
 
-EMU_RUN_OPTS_EXTRA ?=
 EMU_RUN_OPTS = -i $(RUN_BIN_DIR)/$(RUN_BIN).bin
 EMU_RUN_OPTS += --diff $(ABS_WORK_DIR)/ready-to-run/riscv64-nemu-interpreter-so
 EMU_RUN_OPTS += --wave-path $(ABS_WORK_DIR)/sim/emu/$(RUN_BIN)/tb_top.vcd
-EMU_RUN_OPTS += $(EMU_RUN_OPTS_EXTRA)
+EMU_RUN_OPTS += --enable-fork
 emu_rtl-run:
 	$(shell if [ ! -e $(ABS_WORK_DIR)/sim/emu/$(RUN_BIN) ];then mkdir -p $(ABS_WORK_DIR)/sim/emu/$(RUN_BIN); fi)
 	touch sim/emu/$(RUN_BIN)/sim.log

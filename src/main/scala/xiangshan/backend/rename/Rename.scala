@@ -16,7 +16,7 @@
 
 package xiangshan.backend.rename
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -27,8 +27,9 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.rename.freelist._
 import xiangshan.mem.mdp._
 import xs.utils.GTimer
+import xs.utils.perf.HasPerfLogging
 
-class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents {
+class Rename(implicit p: Parameters) extends XSModule with HasPerfEvents with HasPerfLogging{
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
     val robCommits = Flipped(new RobCommitIO)

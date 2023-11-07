@@ -1,6 +1,6 @@
 package xiangshan.backend.execute.fu.csr
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import xiangshan.backend.execute.fu.csr.CSRConst.ModeM
 

@@ -16,13 +16,12 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xs.utils._
-import chisel3.experimental.chiselName
 import xs.utils.mbist.MBISTPipeline
 import xs.utils.sram.{FoldedSRAMTemplate, SRAMTemplate}
 
@@ -30,6 +29,7 @@ import scala.math.min
 import scala.util.matching.Regex
 import scala.{Tuple2 => &}
 import os.followLink
+import xs.utils.perf.HasPerfLogging
 
 trait TageParams extends HasBPUConst with HasXSParameter {
   // println(BankTageTableInfos)
@@ -140,7 +140,7 @@ trait TBTParams extends HasXSParameter with TageParams {
   val bypassEntries = 8
 }
 
-@chiselName
+
 class TageBTable(parentName:String = "Unknown")(implicit p: Parameters) extends XSModule with TBTParams{
   val io = IO(new Bundle {
     val s0_fire = Input(Bool())
@@ -161,7 +161,7 @@ class TageBTable(parentName:String = "Unknown")(implicit p: Parameters) extends 
     parentName = parentName
   ))
   val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-    Some(Module(new MBISTPipeline(1,s"${parentName}_mbistPipe")))
+    MBISTPipeline.PlaceMbistPipeline(1, s"${parentName}_mbistPipe", true)
   } else {
     None
   }
@@ -232,18 +232,18 @@ class TageBTable(parentName:String = "Unknown")(implicit p: Parameters) extends 
     valid = io.update_mask.reduce(_||_) || doing_reset,
     data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs),
     setIdx = Mux(doing_reset, resetRow, u_idx),
-    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt(), updateWayMask)
+    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask)
   )
 
 }
 
 
-@chiselName
+
 class TageTable
 (
   val nRows: Int, val histLen: Int, val tagLen: Int, val tableIdx: Int, parentName:String = "Unknown"
 )(implicit p: Parameters)
-  extends TageModule with HasFoldedHistory {
+  extends TageModule with HasFoldedHistory with HasPerfLogging {
   val io = IO(new Bundle() {
     val req = Flipped(DecoupledIO(new TageReq))
     val resps = Output(Vec(numBr, Valid(new TageResp)))
@@ -265,8 +265,6 @@ class TageTable
   val bankSize = nRowsPerBr / nBanks
   val bankFoldWidth = if (bankSize >= SRAM_SIZE) bankSize / SRAM_SIZE else 1
   val uFoldedWidth = nRowsPerBr / SRAM_SIZE
-  val uWays = uFoldedWidth * numBr
-  val uRows = SRAM_SIZE
   if (bankSize < SRAM_SIZE) {
     println(f"warning: tage table $tableIdx has small sram depth of $bankSize")
   }
@@ -331,7 +329,7 @@ class TageTable
     )))
 
   val mbistTablePipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-    Some(Module(new MBISTPipeline(1,s"${parentName}mbistTablePipe")))
+    MBISTPipeline.PlaceMbistPipeline(1, s"${parentName}_mbistTablePipe")
   } else {
     None
   }
@@ -557,7 +555,7 @@ class FakeTage(implicit p: Parameters) extends BaseTage {
   io.s2_ready := true.B
 }
 
-@chiselName
+
 class Tage(val parentName:String = "Unknown")(implicit p: Parameters) extends BaseTage {
 
   val resp_meta = Wire(new TageMeta)
@@ -576,12 +574,6 @@ class Tage(val parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   bt.io.s0_fire := io.s0_fire(1)
   bt.io.s0_pc   := s0_pc_dup(1)
 
-  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-    Some(Module(new MBISTPipeline(2,s"${parentName}_mbistPipe")))
-  } else {
-    None
-  }
-
   val bankTickCtrDistanceToTops = Seq.fill(numBr)(RegInit((1 << (TickWidth-1)).U(TickWidth.W)))
   val bankTickCtrs = Seq.fill(numBr)(RegInit(0.U(TickWidth.W)))
   val useAltOnNaCtrs = RegInit(
@@ -596,11 +588,11 @@ class Tage(val parentName:String = "Unknown")(implicit p: Parameters) extends Ba
   val s1_resps = VecInit(tables.map(_.io.resps))
 
   //val s1_bim = io.in.bits.resp_in(0).s1.full_pred
-  // val s2_bim = RegEnable(s1_bim, enable=io.s1_fire)
+  // val s2_bim = RegEnable(s1_bim, io.s1_fire)
 
   val debug_pc_s0 = s0_pc_dup(1)
-  val debug_pc_s1 = RegEnable(s0_pc_dup(1), enable=io.s0_fire(1))
-  val debug_pc_s2 = RegEnable(debug_pc_s1, enable=io.s1_fire(1))
+  val debug_pc_s1 = RegEnable(s0_pc_dup(1), io.s0_fire(1))
+  val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire(1))
 
   val s1_provideds        = Wire(Vec(numBr, Bool()))
   val s1_providers        = Wire(Vec(numBr, UInt(log2Ceil(TageNTables).W)))

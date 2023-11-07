@@ -16,14 +16,16 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xs.utils._
 import xs.utils.mbist.MBISTPipeline
+import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
+
 import scala.{Tuple2 => &}
 
 
@@ -216,18 +218,6 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
   }
 
   def display(cond: Bool): Unit = {
-    XSDebug(cond, p"-----------FTB entry----------- \n")
-    XSDebug(cond, p"v=${valid}\n")
-    for(i <- 0 until numBr) {
-      XSDebug(cond, p"[br$i]: v=${allSlotsForBr(i).valid}, offset=${allSlotsForBr(i).offset}," +
-        p"lower=${Hexadecimal(allSlotsForBr(i).lower)}\n")
-    }
-    XSDebug(cond, p"[tailSlot]: v=${tailSlot.valid}, offset=${tailSlot.offset}," +
-      p"lower=${Hexadecimal(tailSlot.lower)}, sharing=${tailSlot.sharing}}\n")
-    XSDebug(cond, p"pftAddr=${Hexadecimal(pftAddr)}, carry=$carry\n")
-    XSDebug(cond, p"isCall=$isCall, isRet=$isRet, isjalr=$isJalr\n")
-    XSDebug(cond, p"last_may_be_rvi_call=$last_may_be_rvi_call\n")
-    XSDebug(cond, p"------------------------------- \n")
   }
 
 }
@@ -237,7 +227,6 @@ class FTBEntryWithTag(implicit p: Parameters) extends XSBundle with FTBParams wi
   val tag = UInt(tagSize.W)
   def display(cond: Bool): Unit = {
     entry.display(cond)
-    XSDebug(cond, p"tag is ${Hexadecimal(tag)}\n------------------------------- \n")
   }
 }
 
@@ -283,7 +272,7 @@ class FTB(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
 
   val ftbAddr = new TableAddr(log2Up(numSets), 1)
 
-  class FTBBank(val numSets: Int, val nWays: Int) extends XSModule with BPUUtils {
+  class FTBBank(val numSets: Int, val nWays: Int) extends XSModule with BPUUtils with HasPerfLogging {
     val io = IO(new Bundle {
       val s1_fire = Input(Bool())
 
@@ -310,11 +299,6 @@ class FTB(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
       hasShareBus = coreParams.hasShareBus,
       parentName = parentName
     ))
-    val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-      Some(Module(new MBISTPipeline(2,s"${parentName}_mbistPipe")))
-    } else {
-      None
-    }
     val ftb_r_entries = ftb.io.r.resp.data.map(_.entry)
 
     val pred_rdata   = HoldUnless(ftb.io.r.resp.data, RegNext(io.req_pc.valid && !io.update_access))
@@ -420,6 +404,11 @@ class FTB(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
   } // FTBBank
 
   val ftbBank = Module(new FTBBank(numSets, numWays))
+  val mbistPipeline = if (coreParams.hasMbist && coreParams.hasShareBus) {
+    MBISTPipeline.PlaceMbistPipeline(1, s"${parentName}_mbistPipe")
+  } else {
+    None
+  }
 
   ftbBank.io.req_pc.valid := io.s0_fire(dupForFtb)
   ftbBank.io.req_pc.bits := s0_pc_dup(dupForFtb)
@@ -470,7 +459,7 @@ class FTB(parentName:String = "Unknown")(implicit p: Parameters) extends BasePre
 
   val s3_fauftb_hit_ftb_miss = RegEnable(!s2_ftb_hit_dup(dupForFtb) && s2_uftb_hit_dup(dupForFtb), io.s2_fire(dupForFtb))
   io.out.last_stage_ftb_entry := Mux(s3_fauftb_hit_ftb_miss, io.in.bits.resp_in(0).last_stage_ftb_entry, s3_ftb_entry_dup(dupForFtb))
-  io.out.last_stage_meta := RegEnable(RegEnable(FTBMeta(writeWay.asUInt(), s1_ftb_hit, s1_uftb_hit_dup(dupForFtb), GTimer()).asUInt(), io.s1_fire(dupForFtb)), io.s2_fire(dupForFtb))
+  io.out.last_stage_meta := RegEnable(RegEnable(FTBMeta(writeWay.asUInt, s1_ftb_hit, s1_uftb_hit_dup(dupForFtb), GTimer()).asUInt, io.s1_fire(dupForFtb)), io.s2_fire(dupForFtb))
 
   // always taken logic
   for (i <- 0 until numBr) {

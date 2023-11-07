@@ -16,7 +16,7 @@
 
 package xiangshan.frontend.icache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundleC, TLBundleD, TLEdgeOut, TLPermissions}
@@ -69,7 +69,7 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
   io.mem_grant.ready := false.B
   io.finish := false.B
 
-  when (io.req.fire()) {
+  when (io.req.fire) {
     req        := io.req.bits
     remain_set := ~0.U(refillCycles.W)
     state      := s_release_req
@@ -111,7 +111,7 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
   io.mem_release.bits  := Mux(req.voluntary, voluntaryReleaseData, 
                             Mux(req.hasData,probeResponseData,probeResponse))
 
-  when (io.mem_release.fire()) { remain_clr := PriorityEncoderOH(remain) }
+  when (io.mem_release.fire) { remain_clr := PriorityEncoderOH(remain) }
 
   val (_, _, release_done, _) = edge.count(io.mem_release)
 
@@ -124,7 +124,7 @@ class RealeaseEntry(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModul
   // receive ReleaseAck for Releases
   when (state === s_release_resp) {
     io.mem_grant.ready := true.B
-    when (io.mem_grant.fire()) {
+    when (io.mem_grant.fire) {
       io.finish := true.B
       state := s_invalid
       state_dup := s_invalid

@@ -19,7 +19,7 @@
  ****************************************************************************************/
 package xiangshan.backend.writeback
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.execute.exu.ExuType
@@ -29,7 +29,9 @@ import xiangshan.frontend.Ftq_RF_Components
 class WriteBackNetwork(implicit p:Parameters) extends LazyModule{
   val node = new WriteBackNetworkNode
 
-  lazy val module = new LazyModuleImp(this) with HasXSParameter {
+  lazy val module = new Impl
+
+  class Impl extends LazyModuleImp(this) with HasXSParameter {
     private val wbSources = node.in.map(i => (i._1, i._2._1))
     private val wbSourcesMap = node.in.map(elm => elm._2._1 -> (elm._1, elm._2._1)).toMap
     private val wbSink = node.out

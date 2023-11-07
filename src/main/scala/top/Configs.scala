@@ -21,7 +21,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import system._
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import xiangshan.frontend.icache.ICacheParameters
 import freechips.rocketchip.devices.debug._
@@ -32,7 +32,8 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.execute.exublock.ExuParameters
 import device.{EnableJtag, XSDebugModuleParams}
 import huancun._
-
+import xs.utils.perf.{DebugOptions, DebugOptionsKey}
+case object PrefixKey extends Field[String]
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
@@ -46,6 +47,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case JtagDTMKey => JtagDTMKey
   case MaxHartIdBits => 2
   case EnableJtag => true.B
+  case PrefixKey => ""
 })
 
 // Synthesizable minimal XiangShan

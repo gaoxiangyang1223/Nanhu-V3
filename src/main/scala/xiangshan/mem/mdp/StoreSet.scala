@@ -16,13 +16,14 @@
 
 package xiangshan.mem.mdp
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xs.utils._
 import xiangshan.backend.rob.RobPtr
+import xs.utils.perf.HasPerfLogging
 
 // store set load violation predictor
 // See "Memory Dependence Prediction using Store Sets" for details
@@ -41,7 +42,7 @@ class SSITDataEntry(implicit p: Parameters) extends XSBundle {
 }
 
 // Store Set Identifier Table
-class SSIT(implicit p: Parameters) extends XSModule {
+class SSIT(implicit p: Parameters) extends XSModule with HasPerfLogging{
   val io = IO(new Bundle {
     // to decode
     val raddr = Vec(DecodeWidth, Input(UInt(MemPredPCWidth.W))) // xor hashed decode pc(VaddrBits-1, 1)
@@ -414,7 +415,7 @@ class LFST(implicit p: Parameters) extends XSModule {
 
   // recover robIdx after squash
   // behavior model, to be refactored later 
-  when(RegNext(io.redirect.fire())) {
+  when(RegNext(io.redirect.fire)) {
     (0 until LFSTSize).map(i => {
       (0 until LFSTWidth).map(j => {
         val check_position = WireInit(allocPtr(i) + (j+1).U)

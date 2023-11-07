@@ -18,7 +18,7 @@
   * Date: 2023-03-31
   ****************************************************************************************/
 package xiangshan.backend.issue.MemRs
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.ChiselAnnotation
 import chisel3.util._

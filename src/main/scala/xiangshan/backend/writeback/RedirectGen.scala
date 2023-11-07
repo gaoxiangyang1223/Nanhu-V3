@@ -22,7 +22,7 @@ package xiangshan.backend.writeback
 import chisel3._
 import chisel3.util._
 import RedirectGen._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import xiangshan._
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.rob.RobPtr

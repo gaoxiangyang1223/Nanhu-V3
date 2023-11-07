@@ -16,14 +16,14 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xs.utils._
-import chisel3.experimental.chiselName
 import xs.utils.mbist.MBISTPipeline
+import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
 
 import scala.math.min
@@ -66,9 +66,9 @@ class SCTableIO(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
   val update = Input(new SCUpdate(ctrBits))
 }
 
-@chiselName
+
 class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int, parentName:String = "Unknown")(implicit p: Parameters)
-  extends SCModule with HasFoldedHistory {
+  extends SCModule with HasFoldedHistory with HasPerfLogging {
   val io = IO(new SCTableIO(ctrBits))
 
   // val table = Module(new SRAMTemplate(SInt(ctrBits.W), set=nRows, way=2*TageBanks, shouldReset=true, holdRead=true, singlePort=false))
@@ -78,7 +78,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int, parentName:Str
     parentName = parentName + "table_"
   ))
   val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-    Some(Module(new MBISTPipeline(1,s"${parentName}_mbistPipe")))
+    MBISTPipeline.PlaceMbistPipeline(1, s"${parentName}_mbistPipe", true)
   } else {
     None
   }
@@ -107,9 +107,9 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int, parentName:Str
   def ctrUpdate(ctr: SInt, cond: Bool): SInt = signedSatUpdate(ctr, ctrBits, cond)
 
   val s0_idx = getIdx(io.req.bits.pc, io.req.bits.folded_hist)
-  val s1_idx = RegEnable(s0_idx, enable=io.req.valid)
+  val s1_idx = RegEnable(s0_idx, io.req.valid)
 
-  val s1_pc = RegEnable(io.req.bits.pc, io.req.fire())
+  val s1_pc = RegEnable(io.req.bits.pc, io.req.fire)
   val s1_unhashed_idx = s1_pc >> instOffsetBits
 
   table.io.r.req.valid := io.req.valid
@@ -237,11 +237,6 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         if (!EnableSC) {t.io.update := DontCare}
         t
       }
-    }
-    val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-      Some(Module(new MBISTPipeline(2,s"${parentName}_mbistPipe")))
-    } else {
-      None
     }
     sc_fh_info = scTables.map(_.getFoldedHistoryInfo).reduce(_++_).toSet
 

@@ -18,7 +18,7 @@
  * Date: 2023-06-19
  ****************************************************************************************/
 package xiangshan.backend.execute.exucx
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.LazyModule
@@ -33,7 +33,9 @@ class AluJmpComplex(id: Int, bypassNum:Int)(implicit p:Parameters) extends Basic
   jmp.issueNode :*= issueNode
   writebackNode :=* alu.writebackNode
   writebackNode :=* jmp.writebackNode
-  lazy val module = new BasicExuComplexImp(this, bypassNum){
+  lazy val module = new Impl
+
+  class Impl extends BasicExuComplexImp(this, bypassNum){
     require(issueNode.in.length == 1)
     require(issueNode.out.length == 2)
     private val issueIn = issueNode.in.head._1

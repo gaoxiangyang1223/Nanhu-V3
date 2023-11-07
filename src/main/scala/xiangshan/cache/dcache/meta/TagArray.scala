@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xs.utils.mbist.MBISTPipeline
@@ -64,11 +64,6 @@ class TagArray(parentName:String = "Unknown")(implicit p: Parameters) extends DC
     hasShareBus = coreParams.hasShareBus,
     parentName = parentName
   ))
-  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-    Some(Module(new MBISTPipeline(1,s"${parentName}_sub_mbistPipe")))
-  } else {
-    None
-  }
 
   // val ecc_array = Module(new SRAMTemplate(UInt(eccTagBits.W), set = nSets, way = nWays,
   //   shouldReset = false, holdRead = false, singlePort = true))
@@ -78,7 +73,7 @@ class TagArray(parentName:String = "Unknown")(implicit p: Parameters) extends DC
   tag_array.io.w.req.bits.apply(
     setIdx = waddr,
     data = wdata,
-    waymask = VecInit(wmask).asUInt()
+    waymask = VecInit(wmask).asUInt
   )
 
   // val ecc_wen = rst || io.ecc_write.valid
@@ -89,17 +84,17 @@ class TagArray(parentName:String = "Unknown")(implicit p: Parameters) extends DC
   // ecc_array.io.w.req.bits.apply(
   //   setIdx = ecc_waddr,
   //   data = ecc_wdata,
-  //   waymask = VecInit(ecc_wmask).asUInt()
+  //   waymask = VecInit(ecc_wmask).asUInt
   // )
 
   // tag read
-  val ren = io.read.fire()
+  val ren = io.read.fire
 
   tag_array.io.r.req.valid := ren
   tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
   io.resp := tag_array.io.r.resp.data
 
-  // val ecc_ren = io.ecc_read.fire()
+  // val ecc_ren = io.ecc_read.fire
   // ecc_array.io.r.req.valid := ecc_ren
   // ecc_array.io.r.req.bits.apply(setIdx = io.ecc_read.bits.idx)
   io.ecc_resp := 0.U.asTypeOf(io.ecc_resp.cloneType)//ecc_array.io.r.resp.data
@@ -123,7 +118,7 @@ class DuplicatedTagArray(readPorts: Int, parentName:String = "Unknown")(implicit
 
   val array = Seq.tabulate(readPorts) { idx => Module(new TagArray(parentName + s"array${idx}_")) }
   val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-    Some(Module(new MBISTPipeline(2,s"${parentName}_mbistPipe")))
+    MBISTPipeline.PlaceMbistPipeline(1, s"${parentName}_mbistPipe")
   } else {
     None
   }

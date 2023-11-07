@@ -20,7 +20,7 @@
 package xiangshan.backend.execute.exublock
 
 import chisel3.util.Pipe
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import xiangshan.backend.execute.exucx.{FmaDivComplex, FmaMiscComplex, FmacComplex}
 import freechips.rocketchip.diplomacy.LazyModule
@@ -34,7 +34,9 @@ class FloatingBlock(implicit p:Parameters) extends BasicExuBlock{
     exucx.issueNode :*= issueNode
     writebackNode :=* exucx.writebackNode
   })
-  lazy val module = new BasicExuBlockImp(this){
+  lazy val module = new Impl
+
+  class Impl extends BasicExuBlockImp(this){
     val io = IO(new Bundle{
       val csr_frm: UInt = Input(UInt(3.W))
     })

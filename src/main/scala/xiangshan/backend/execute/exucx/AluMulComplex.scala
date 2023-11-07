@@ -19,7 +19,7 @@
  ****************************************************************************************/
 package xiangshan.backend.execute.exucx
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.Valid
 import freechips.rocketchip.diplomacy.LazyModule
@@ -34,7 +34,9 @@ class AluMulComplex(id: Int, bypassNum:Int)(implicit p:Parameters) extends Basic
   writebackNode :=* alu.writebackNode
   writebackNode :=* mul.writebackNode
 
-  lazy val module = new BasicExuComplexImp(this, bypassNum){
+  lazy val module = new Impl
+
+  class Impl extends BasicExuComplexImp(this, bypassNum){
     require(issueNode.in.length == 1)
     require(issueNode.out.length == 2)
     val io = IO(new Bundle{

@@ -16,7 +16,7 @@
 
 package xiangshan.mem
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -28,8 +28,9 @@ import difftest._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.execute.fu.PMPRespBundle
 import xiangshan.backend.execute.fu.csr.SdtrigExt
+import xs.utils.perf.HasPerfLogging
 
-class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants with SdtrigExt{
+class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants with SdtrigExt with HasPerfLogging{
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val in            = Flipped(Decoupled(new ExuInput))

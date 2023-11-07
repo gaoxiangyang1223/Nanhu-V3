@@ -18,7 +18,7 @@
  * Date: 2023-06-19
  ****************************************************************************************/
 package xiangshan.backend.execute.exucx
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3.internal.sourceinfo.SourceInfo
 import freechips.rocketchip.diplomacy._
 import xiangshan.backend.execute.exu.{ExuConfig, ExuOutwardImpl, ExuType}

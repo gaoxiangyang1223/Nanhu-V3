@@ -16,15 +16,16 @@
 
 package xiangshan.backend.decode
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.rename.RatReadPort
+import xs.utils.perf.HasPerfLogging
 
-class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents {
+class DecodeStage(implicit p: Parameters) extends XSModule with HasPerfEvents with HasPerfLogging {
   val io = IO(new Bundle() {
     // from Ibuffer
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new CtrlFlow)))

@@ -16,13 +16,14 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xs.utils._
 import xiangshan.ExceptionNO._
+import xs.utils.perf.HasPerfLogging
 
 class IbufPtr(implicit p: Parameters) extends CircularQueuePtr[IbufPtr](
   p => p(XSCoreParamsKey).IBufSize
@@ -90,7 +91,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   }
 }
 
-class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
+class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents with HasPerfLogging {
   val io = IO(new IBufferIO)
 
   val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, 2 * DecodeWidth, PredictWidth, "IBuffer"))
@@ -123,7 +124,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   for (i <- 0 until PredictWidth) {
     ibuf.io.waddr(i) := enqPtrVec(enqOffset(i)).value
     ibuf.io.wdata(i) := enqData(i)
-    ibuf.io.wen(i)   := io.in.bits.enqEnable(i) && io.in.fire && !io.flush
+    ibuf.io.wen(i)  := io.in.bits.enqEnable(i) && io.in.fire && !io.flush
   }
 
   when (io.in.fire && !io.flush) {
@@ -167,6 +168,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   for (i <- 0 until DecodeWidth) {
     deqData(i) := ParallelPriorityMux(deqEnable_n, nextStepData.drop(i).take(DecodeWidth + 1))
   }
+
   ibuf.io.raddr := VecInit(deqPtrVecNext.map(_.value))
 
   // Flush

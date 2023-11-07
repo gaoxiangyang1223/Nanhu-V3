@@ -18,7 +18,7 @@
  * Date: 2023-06-19
  ****************************************************************************************/
 package xiangshan.backend.issue.FpRs
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.prefix
 import chisel3.util._

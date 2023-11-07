@@ -16,19 +16,17 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xs.utils._
-import chisel3.experimental.chiselName
 import xs.utils.sram.FoldedSRAMTemplate
 import scala.math.min
-import scala.util.matching.Regex
 import scala.{Tuple2 => &}
-import firrtl.passes.wiring.Wiring
 import xs.utils.mbist.MBISTPipeline
+import xs.utils.perf.HasPerfLogging
 
 trait ITTageParams extends HasXSParameter with HasBPUParameter {
 
@@ -139,13 +137,13 @@ class FakeITTageTable()(implicit p: Parameters) extends ITTageModule {
   io.resp := DontCare
 
 }
-@chiselName
+
 class ITTageTable
 (
   val nRows: Int, val histLen: Int, val tagLen: Int, val uBitPeriod: Int, val tableIdx: Int,
   parentName:String = "Unknown"
 )(implicit p: Parameters)
-  extends ITTageModule with HasFoldedHistory {
+  extends ITTageModule with HasFoldedHistory with HasPerfLogging {
   val io = IO(new Bundle() {
     val req = Flipped(DecoupledIO(new ITTageReq))
     val resp = Output(Valid(new ITTageResp))
@@ -227,7 +225,7 @@ class ITTageTable
       parentName = parentName + s"bank${idx}_"
     )))
   val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-    Some(Module(new MBISTPipeline(1,s"${parentName}_mbistPipe")))
+    MBISTPipeline.PlaceMbistPipeline(1, s"${parentName}_mbistPipe", true)
   } else {
     None
   }
@@ -359,7 +357,7 @@ class FakeITTage(implicit p: Parameters) extends BaseITTage {
   io.s2_ready := true.B
 }
 // TODO: check target related logics
-@chiselName
+
 class ITTage(parentName:String = "Unknown")(implicit p: Parameters) extends BaseITTage {
   override val meta_size = 0.U.asTypeOf(new ITTageMeta).getWidth
 
@@ -371,11 +369,6 @@ class ITTage(parentName:String = "Unknown")(implicit p: Parameters) extends Base
       t.io.req.bits.pc := s0_pc_dup(dupForIttage)
       t.io.req.bits.folded_hist := io.in.bits.folded_hist(dupForIttage)
       t
-  }
-  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-    Some(Module(new MBISTPipeline(2,s"${parentName}_mbistPipe")))
-  } else {
-    None
   }
   override def getFoldedHistoryInfo = Some(tables.map(_.getFoldedHistoryInfo).reduce(_++_))
 
@@ -391,9 +384,9 @@ class ITTage(parentName:String = "Unknown")(implicit p: Parameters) extends Base
   val s1_resps = VecInit(tables.map(t => t.io.resp))
   val s2_resps = RegEnable(s1_resps, s1_fire)
 
-  val debug_pc_s1 = RegEnable(s0_pc_dup(dupForIttage), enable=s0_fire)
-  val debug_pc_s2 = RegEnable(debug_pc_s1, enable=s1_fire)
-  val debug_pc_s3 = RegEnable(debug_pc_s2, enable=s2_fire)
+  val debug_pc_s1 = RegEnable(s0_pc_dup(dupForIttage), s0_fire)
+  val debug_pc_s2 = RegEnable(debug_pc_s1, s1_fire)
+  val debug_pc_s3 = RegEnable(debug_pc_s2, s2_fire)
 
   val s2_tageTaken         = Wire(Bool())
   val s2_tageTarget        = Wire(UInt(VAddrBits.W))

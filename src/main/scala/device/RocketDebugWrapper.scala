@@ -21,7 +21,7 @@ import xiangshan._
 import chisel3.experimental.{ExtModule, IntParam, noPrefix}
 import chisel3.util._
 import chisel3.util.HasExtModuleResource
-import freechips.rocketchip.config.{Field, Parameters}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.amba.apb._
 import freechips.rocketchip.diplomacy._
@@ -49,7 +49,8 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 //    l2xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
 //  }
 
-  lazy val module = new LazyRawModuleImp(this) {
+  lazy val module = new Impl
+  class Impl extends LazyRawModuleImp(this) {
     val io = IO(new Bundle{
       val resetCtrl = new ResetCtrlIO(numCores)(p)
       val debugIO = new DebugIO()(p)
@@ -92,7 +93,7 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
       debug.module.io.dmi.get.dmiReset := sj.reset
       dtm
     }
-  }
+    }
 }
 
 object XSDebugModuleParams {
@@ -141,7 +142,7 @@ class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends ExtModule
     tbsuccess := exit === 1.U
     when (exit >= 2.U) {
       printf("*** FAILED *** (exit code = %d)\n", exit >> 1.U)
-      stop(1)
+      stop()
     }
   }
 }

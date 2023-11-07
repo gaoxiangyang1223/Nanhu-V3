@@ -19,9 +19,9 @@
  ****************************************************************************************/
 package xiangshan.backend.execute.exublock
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.execute.exucx.{AluDivComplex, AluJmpComplex, AluMulComplex}
-import freechips.rocketchip.diplomacy.LazyModule
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import chisel3._
 import chisel3.util._
 import xiangshan.{ExuInput, ExuOutput, XSCoreParamsKey}
@@ -39,7 +39,9 @@ class IntegerBlock(implicit p:Parameters) extends BasicExuBlock {
     writebackNode :=* exucx.writebackNode
   })
 
-  lazy val module = new BasicExuBlockImp(this){
+  lazy val module = new Impl
+
+  class Impl extends BasicExuBlockImp(this) {
     val io = IO(new Bundle {
       val fenceio = new FenceIO
       val csrio = new CSRFileIO

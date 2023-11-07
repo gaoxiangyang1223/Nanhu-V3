@@ -16,21 +16,22 @@
 
 package system
 
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import device.{DebugModule, TLPMA, TLPMAIO}
 import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams, PLICParams, TLError, TLPLIC}
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
-import utils.{BinaryArbiter, TLEdgeBuffer}
-import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
+import xs.utils.tl.TLEdgeBuffer
+import xiangshan.{HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.tilelink._
 import top.BusPerfMonitor
 import huancun._
-import huancun.debug.TLLogger
+import xs.utils.tl.TLLogger
 import xiangshan.backend.execute.fu.PMAConst
+import xs.utils.perf.DebugOptionsKey
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -259,7 +260,8 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
   class IntSourceNodeToModule(val num: Int)(implicit p: Parameters) extends LazyModule {
     val sourceNode = IntSourceNode(IntSourcePortSimple(num, ports = 1, sources = 1))
-    lazy val module = new LazyModuleImp(this){
+    lazy val module = new Impl
+    class Impl extends LazyModuleImp(this){
       val in = IO(Input(Vec(num, Bool())))
       in.zip(sourceNode.out.head._1).foreach{ case (i, s) => s := i }
     }
@@ -277,7 +279,9 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     l3_xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
   }
 
-  lazy val module = new LazyModuleImp(this){
+  lazy val module = new Impl
+
+  class Impl extends LazyModuleImp(this){
 
     val debug_module_io = IO(chiselTypeOf(debugModule.module.io))
     val ext_intrs = IO(Input(UInt(NrExtIntr.W)))

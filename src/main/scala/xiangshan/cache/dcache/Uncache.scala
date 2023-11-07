@@ -18,14 +18,15 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import utils.{HasTLDump, XSDebug}
-import chipsalliance.rocketchip.config.Parameters
+import utils.HasTLDump
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
 import xs.utils.PriorityMuxWithFlag
+import xs.utils.perf.HasPerfLogging
 
 // One miss entry deals with one mmio request
-class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
+class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasPerfLogging
 {
   val io = IO(new Bundle {
     // MSHR ID
@@ -65,7 +66,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   when (state === s_invalid) {
     io.req.ready := true.B
 
-    when (io.req.fire()) {
+    when (io.req.fire) {
       req   := io.req.bits
       req.addr := io.req.bits.addr
       state := s_refill_req
@@ -102,7 +103,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     io.mem_acquire.valid := true.B
     io.mem_acquire.bits  := Mux(req.cmd === MemoryOpConstants.M_XWR, store, load)
 
-    when (io.mem_acquire.fire()) {
+    when (io.mem_acquire.fire) {
       state := s_refill_resp
     }
   }
@@ -112,7 +113,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   when (state === s_refill_resp) {
     io.mem_grant.ready := true.B
 
-    when (io.mem_grant.fire()) {
+    when (io.mem_grant.fire) {
       resp_data := io.mem_grant.bits.data
       assert(refill_done, "MMIO response should be one beat only!")
       state := s_send_resp
@@ -130,7 +131,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     io.resp.bits.tag_error := false.B
     io.resp.bits.error := false.B
 
-    when (io.resp.fire()) {
+    when (io.resp.fire) {
       state := s_invalid
     }
   }
@@ -159,7 +160,7 @@ class Uncache()(implicit p: Parameters) extends LazyModule {
 
 class UncacheImp(outer: Uncache)
   extends LazyModuleImp(outer)
-    with HasTLDump
+    with HasTLDump with HasPerfLogging
 {
   val io = IO(new UncacheIO)
 
@@ -217,16 +218,16 @@ class UncacheImp(outer: Uncache)
   // print all input/output requests for debug purpose
 
   // print req/resp
-  XSDebug(req.fire(), "req cmd: %x addr: %x data: %x mask: %x\n",
+  XSDebug(req.fire, "req cmd: %x addr: %x data: %x mask: %x\n",
     req.bits.cmd, req.bits.addr, req.bits.data, req.bits.mask)
-  XSDebug(resp.fire(), "data: %x\n", req.bits.data)
+  XSDebug(resp.fire, "data: %x\n", req.bits.data)
 
   // print tilelink messages
   when(mem_acquire.valid){
     XSDebug("mem_acquire valid, ready=%d ", mem_acquire.ready)
     mem_acquire.bits.dump
   }
-  when (mem_grant.fire()) {
+  when (mem_grant.fire) {
     XSDebug("mem_grant fire ")
     mem_grant.bits.dump
   }

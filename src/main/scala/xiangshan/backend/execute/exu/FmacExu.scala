@@ -19,7 +19,7 @@
  * Date: 2023-06-19
  ****************************************************************************************/
 package xiangshan.backend.execute.exu
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import xiangshan.backend.execute.fu.FuConfigs
 import xiangshan.backend.execute.fu.fpu.FMA

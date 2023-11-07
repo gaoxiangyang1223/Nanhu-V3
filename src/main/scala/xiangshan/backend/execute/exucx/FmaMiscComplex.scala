@@ -19,7 +19,7 @@
  ****************************************************************************************/
 package xiangshan.backend.execute.exucx
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import freechips.rocketchip.diplomacy.LazyModule
 import xiangshan.FuType
@@ -32,7 +32,9 @@ class FmaMiscComplex(id: Int)(implicit p:Parameters) extends BasicExuComplex{
   fmisc.issueNode :*= issueNode
   writebackNode :=* fmisc.writebackNode
   writebackNode :=* fmac.writebackNode
-  lazy val module = new BasicExuComplexImp(this, 0){
+  lazy val module = new Impl
+
+  class Impl extends BasicExuComplexImp(this, 0){
     require(issueNode.in.length == 1)
     require(issueNode.out.length == 2)
     val csr_frm: UInt = IO(Input(UInt(3.W)))

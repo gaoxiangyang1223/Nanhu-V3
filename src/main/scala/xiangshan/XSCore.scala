@@ -20,38 +20,26 @@
 
 package xiangshan
 
-import chipsalliance.rocketchip.config
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink.TLBuffer
-import xs.utils.mbist.MBISTPipeline
+import xs.utils.mbist.{MBISTInterface, MBISTPipeline}
 import xs.utils.sram.SRAMTemplate
-import xs.utils.{ModuleNode, ResetGen, ResetGenNode, DFTResetSignals}
+import xs.utils.{DFTResetSignals, ModuleNode, ResetGen, ResetGenNode}
 import system.HasSoCParameter
 import utils._
 import xiangshan.backend._
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
 
-abstract class XSModule(implicit val p: Parameters) extends MultiIOModule
+abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
   with HasFPUParameters {
-  def io: Record
-}
-
-//remove this trait after impl module logic
-trait NeedImpl {
-  this: RawModule =>
-  override protected def IO[T <: Data](iodef: T): T = {
-    println(s"[Warn]: (${this.name}) please reomve 'NeedImpl' after implement this module")
-    val io = chisel3.experimental.IO(iodef)
-    io <> DontCare
-    io
-  }
 }
 
 abstract class XSBundle(implicit val p: Parameters) extends Bundle
@@ -115,6 +103,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   io.beu_errors.icache := frontend.io.error.toL1BusErrorUnitInfo()
   io.beu_errors.dcache := exuBlock.io.l1Error.toL1BusErrorUnitInfo()
+  io.beu_errors.l2 := DontCare
 
   frontend.io.backend <> ctrlBlock.io.frontend
   frontend.io.sfence := fenceio.sfence
@@ -122,6 +111,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.csrCtrl <> csrioIn.customCtrl
   frontend.io.fencei <> fenceio.fencei
   frontend.io.prefetchI := exuBlock.io.prefetchI
+  frontend.io.reset_vector := DontCare
 
   ctrlBlock.io.csrCtrl <> csrioIn.customCtrl
   ctrlBlock.io.lqCancelCnt := exuBlock.io.lqCancelCnt
@@ -168,6 +158,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   csrioIn.distributedUpdate(1).w.valid := frontend.io.csrUpdate.w.valid
   csrioIn.distributedUpdate(1).w.bits := frontend.io.csrUpdate.w.bits
 
+  csrioIn.memExceptionVAddr := DontCare
+  csrioIn.distributedUpdate(0) := DontCare
+  exuBlock.io.fenceio.sbuffer.sbIsEmpty := DontCare
   exuBlock.io.rob := ctrlBlock.io.robio.lsq
   exuBlock.io.pcMemWrite.en := RegNext(frontend.io.backend.fromFtq.pc_mem_wen, false.B)
   exuBlock.io.pcMemWrite.addr := RegEnable(frontend.io.backend.fromFtq.pc_mem_waddr, frontend.io.backend.fromFtq.pc_mem_wen)
@@ -185,20 +178,34 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
 
-  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-    Some(Module(new MBISTPipeline(Int.MaxValue,s"MBIST_Core")))
+  val mbistPipeline = if (coreParams.hasMbist && coreParams.hasShareBus) {
+    MBISTPipeline.PlaceMbistPipeline(Int.MaxValue, s"MBIST_Core", true)
   } else {
     None
   }
-  val mbist = if(coreParams.hasMbist && coreParams.hasShareBus) Some(IO(mbistPipeline.get.io.mbist.get.cloneType)) else None
-  if(coreParams.hasMbist && coreParams.hasShareBus){
-    mbist.get <> mbistPipeline.get.io.mbist.get
-  }
-  val sigFromSrams = if(coreParams.hasMbist) Some(SRAMTemplate.genBroadCastBundleTop()) else None
-  val dft = if(coreParams.hasMbist) Some(IO(sigFromSrams.get.cloneType)) else None
-  if(coreParams.hasMbist) {
+  val sigFromSrams = if (coreParams.hasMbist) Some(SRAMTemplate.genBroadCastBundleTop()) else None
+  val dft = if (coreParams.hasMbist) Some(IO(sigFromSrams.get.cloneType)) else None
+  if (coreParams.hasMbist) {
     dft.get <> sigFromSrams.get
     dontTouch(dft.get)
+  }
+
+  val coreMbistIntf = if (outer.coreParams.hasMbist && outer.coreParams.hasShareBus) {
+    val params = mbistPipeline.get.nodeParams
+    val intf = Some(Module(new MBISTInterface(
+      params = Seq(params),
+      ids = Seq(mbistPipeline.get.childrenIds),
+      name = s"MBIST_intf_core",
+      pipelineNum = 1
+    )))
+    intf.get.toPipeline.head <> mbistPipeline.get.mbist
+    if (coreParams.HartId == 0) mbistPipeline.get.genCSV(intf.get.info, "MBIST_Core")
+    intf.get.mbist := DontCare
+    dontTouch(intf.get.mbist)
+    //TODO: add mbist controller connections here
+    intf
+  } else {
+    None
   }
   // Modules are reset one by one
   private val resetTree = ResetGenNode(

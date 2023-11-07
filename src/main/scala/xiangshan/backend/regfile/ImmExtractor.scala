@@ -19,7 +19,7 @@
  ****************************************************************************************/
 package xiangshan.backend.regfile
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import xiangshan._
 import xiangshan.backend.decode.{ImmUnion, Imm_LUI_LOAD}

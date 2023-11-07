@@ -16,12 +16,13 @@
 
 package xiangshan.backend.execute.fu.csr
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import difftest._
 import freechips.rocketchip.util._
 import utils._
+import xs.utils.perf.HasPerfLogging
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.execute.fu.{FUWithRedirect, FunctionUnit, PMAMethod, PMPEntry, PMPMethod}
@@ -110,9 +111,10 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val distributedUpdate = Vec(2, Flipped(new DistributedCSRUpdateReq))
 }
 
-class CSR(implicit p: Parameters) extends FUWithRedirect with HasCSRConst with PMPMethod with PMAMethod with HasTriggerConst
-  with SdtrigExt with DebugCSR
-{
+class CSR(implicit p: Parameters) extends FUWithRedirect
+  with HasCSRConst with PMPMethod with PMAMethod
+  with HasTriggerConst  with SdtrigExt with DebugCSR with HasPerfLogging {
+
   val csrio = IO(new CSRFileIO)
 
   val cfIn = io.in.bits.uop.cf

@@ -1,27 +1,27 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+ * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xs.utils.mbist.MBISTPipeline
-import utils.{XSDebug, XSPerfAccumulate}
 import xiangshan.backend.rob.RobPtr
+import xs.utils.perf.HasPerfLogging
 import xs.utils.sram.SRAMTemplate
 
 class L1BankedDataReadReq(implicit p: Parameters) extends DCacheBundle
@@ -76,7 +76,7 @@ class DataSRAMBankWriteReq(implicit p: Parameters) extends DCacheBundle {
 // | Way1  | Way1  | Way1  | Way1  | Way1  | Way1  | Way1  | Way1  |
 // | ....  | ....  | ....  | ....  | ....  | ....  | ....  | ....  |
 // -----------------------------------------------------------------
-abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheModule
+abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheModule with HasPerfLogging
 {
   val ReadlinePortErrorIndex = LoadPipelineWidth
   val io = IO(new DCacheBundle {
@@ -157,7 +157,7 @@ class BankedDataArray(parentName: String = "Unknown")(implicit p: Parameters) ex
   io.write_dup.foreach(_.ready := true.B)
 
   // wrap data rows of 8 ways
-  class DataSRAMBank(index: Int, parentName:String = "Unknown") extends Module {
+  class DataSRAMBank(index: Int, parentName: String = "Unknown") extends Module {
     val io = IO(new Bundle() {
       val w = Input(new DataSRAMBankWriteReq)
 
@@ -175,7 +175,7 @@ class BankedDataArray(parentName: String = "Unknown")(implicit p: Parameters) ex
     // val rw_bypass = RegNext(io.w.addr === io.r.addr && io.w.way_en === io.r.way_en && io.w.en)
 
     // multiway data bank
-    val data_bank = Array.tabulate(DCacheWays) {idx =>
+    val data_bank = Array.tabulate(DCacheWays) { idx =>
       Module(new SRAMTemplate(
         Bits(DCacheSRAMRowBits.W),
         set = DCacheSets,
@@ -188,8 +188,8 @@ class BankedDataArray(parentName: String = "Unknown")(implicit p: Parameters) ex
         parentName = parentName + s"bank${idx}_"
       ))
     }
-    val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-      Some(Module(new MBISTPipeline(1,s"${parentName}_mbistPipe")))
+    val mbistPipeline = if (coreParams.hasMbist && coreParams.hasShareBus) {
+      MBISTPipeline.PlaceMbistPipeline(1, s"${parentName}_mbistPipe")
     } else {
       None
     }
@@ -211,7 +211,7 @@ class BankedDataArray(parentName: String = "Unknown")(implicit p: Parameters) ex
     val data_left = Mux1H(r_way_en_reg.tail(half), data_read.take(half))
     val data_right = Mux1H(r_way_en_reg.head(half), data_read.drop(half))
 
-    val sel_low = r_way_en_reg.tail(half).orR()
+    val sel_low = r_way_en_reg.tail(half).orR
     val row_data = Mux(sel_low, data_left, data_right)
 
     io.r.data := row_data
@@ -243,11 +243,6 @@ class BankedDataArray(parentName: String = "Unknown")(implicit p: Parameters) ex
   }
 
   val data_banks = List.tabulate(DCacheBanks)(i => Module(new DataSRAMBank(i, parentName = parentName + s"array${i}_")))
-  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-    Some(Module(new MBISTPipeline(2,s"${parentName}_mbistPipe")))
-  } else {
-    None
-  }
   // val ecc_banks = List.fill(DCacheBanks)(Module(new SRAMTemplate(
   //   Bits(eccBits.W),
   //   set = DCacheSets,
@@ -398,7 +393,7 @@ class BankedDataArray(parentName: String = "Unknown")(implicit p: Parameters) ex
   // error detection
   // normal read ports
   (0 until LoadPipelineWidth).map(rport_index => {
-    // io.read_error_delayed(rport_index) := RegNext(RegNext(io.read(rport_index).fire())) && 
+    // io.read_error_delayed(rport_index) := RegNext(RegNext(io.read(rport_index).fire)) && 
     //   read_bank_error_delayed(RegNext(RegNext(bank_addrs(rport_index)))) &&
     //   !RegNext(io.bank_conflict_slow(rport_index))
     io.read_error_delayed(rport_index) := 0.U.asTypeOf(io.read_error_delayed(rport_index).cloneType)

@@ -1,20 +1,21 @@
 package xiangshan
 
 import chisel3._
-import chipsalliance.rocketchip.config.{Config, Parameters}
+import org.chipsalliance.cde.config.{Config, Parameters}
 import chisel3.experimental.hierarchy.{Definition, instantiable, public, Instance}
 import chisel3.util.{Valid, ValidIO}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
-import huancun.debug.TLLogger
+import xs.utils.tl.TLLogger
 import xs.utils.mbist.MBISTInterface
 import huancun.{HCCacheParamsKey, HuanCun}
 import xs.utils.{ResetGen, DFTResetSignals}
 import system.HasSoCParameter
 import top.BusPerfMonitor
 import utils.{IntBuffer, TLClientsMerger, TLEdgeBuffer}
+import xs.utils.perf.DebugOptionsKey
 import xs.utils.sram.BroadCastBundle
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
@@ -70,14 +71,14 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   beu.node := TLBuffer.chainNode(3) := mmio_xbar
   mmio_port := TLBuffer.chainNode(3) := mmio_xbar
 
-  lazy val module = new LazyModuleImp(this){
+  lazy val module = new Impl
+  class Impl extends LazyModuleImp(this){
     val beu_errors = IO(Input(chiselTypeOf(beu.module.io.errors)))
     beu.module.io.errors <> beu_errors
   }
 }
 
-class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends LazyHardenModule[XSTileImp]
-//class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule
+class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule
   with HasXSParameter
   with HasSoCParameter {
   val core = LazyModule(new XSCore(parentName + "core_"))
@@ -85,6 +86,7 @@ class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends 
   val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
     LazyModule(new HuanCun(parentName = parentName + "L2_")(new Config((_, _, _) => {
       case HCCacheParamsKey => l2param.copy(enableTopDown = env.EnableTopDown)
+      case DebugOptionsKey => p(DebugOptionsKey)
     })))
   )
 
@@ -150,14 +152,13 @@ class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends 
   lazy val module = new XSTileImp(this)
 }
 
-@instantiable
-class XSTileImp(outer: XSTile) extends LazyHardenModuleImp(outer) {
-  @public val io = IO(new Bundle {
+class XSTileImp(outer: XSTile) extends LazyModuleImp(outer) {
+  val io = IO(new Bundle {
     val hartId = Input(UInt(64.W))
     val cpu_halt = Output(Bool())
     val dfx_reset = Input(new DFTResetSignals())
   })
-  @public val ireset = reset
+  val ireset = reset
   dontTouch(io.hartId)
 
   val core_soft_rst = outer.core_reset_sink.in.head._1
@@ -181,48 +182,6 @@ class XSTileImp(outer: XSTile) extends LazyHardenModuleImp(outer) {
     outer.misc.module.beu_errors.l2 <> 0.U.asTypeOf(outer.misc.module.beu_errors.l2)
   }
 
-  val coreMbistIntf = if(outer.coreParams.hasMbist && outer.coreParams.hasShareBus){
-    val params = outer.core.module.mbistPipeline.get.bd.params
-    val node = outer.core.module.mbistPipeline.get.node
-    val intf = Some(Module(new MBISTInterface(
-      params = Seq(params),
-      ids = Seq(node.children.flatMap(_.array_id)),
-      name = s"MBIST_intf_core",
-      pipelineNum = 1
-    )))
-    intf.get.toPipeline.head <> outer.core.module.mbist.get
-    outer.core.module.mbistPipeline.get.genCSV(intf.get.info, "MBIST_Core")
-    intf.get.mbist := DontCare
-    dontTouch(intf.get.mbist)
-    //TODO: add mbist controller connections here
-    intf
-  } else {
-    None
-  }
-
-  val l2MbistIntf = if(outer.l2cache.isDefined){
-    if(p(XSCoreParamsKey).L2CacheParamsOpt.get.hasMbist && p(XSCoreParamsKey).L2CacheParamsOpt.get.hasShareBus){
-      val params = outer.l2cache.get.module.l2TopPipeLine.get.bd.params
-      val node = outer.l2cache.get.module.l2TopPipeLine.get.node
-      val intf = Some(Module(new MBISTInterface(
-        params = Seq(params),
-        ids = Seq(node.children.flatMap(_.array_id)),
-        name = s"MBIST_intf_l2",
-        pipelineNum = 1
-      )))
-      intf.get.toPipeline.head <> outer.l2cache.get.module.l2pipePorts.get
-      outer.l2cache.get.module.l2TopPipeLine.get.genCSV(intf.get.info, "MBIST_L2")
-      intf.get.mbist := DontCare
-      dontTouch(intf.get.mbist)
-      //TODO: add mbist controller connections here
-      intf
-    } else {
-      None
-    }
-  } else {
-    None
-  }
-
   val mbistBroadCastToCore = if(outer.coreParams.hasMbist) {
     val res = Some(Wire(new BroadCastBundle))
     outer.core.module.dft.get := res.get
@@ -241,7 +200,7 @@ class XSTileImp(outer: XSTile) extends LazyHardenModuleImp(outer) {
   } else {
     None
   }
-  @public val dft = if(mbistBroadCastToCore.isDefined || mbistBroadCastToL2.isDefined){
+  val dft = if(mbistBroadCastToCore.isDefined || mbistBroadCastToL2.isDefined){
     Some(IO(new BroadCastBundle))
   } else {
     None
@@ -261,8 +220,8 @@ class XSTileImp(outer: XSTile) extends LazyHardenModuleImp(outer) {
   // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
   val resetChain = Seq(
     Seq(outer.misc.module, outer.core.module) ++
-      outer.l1i_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
-      outer.ptw_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
+      outer.l1i_to_l2_buffers.map(_.module.asInstanceOf[Module]) ++
+      outer.ptw_to_l2_buffers.map(_.module.asInstanceOf[Module]) ++
       outer.l1d_to_l2_bufferOpt.map(_.module) ++
       outer.l2cache.map(_.module)
   )

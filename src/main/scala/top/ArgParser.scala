@@ -16,9 +16,10 @@
 
 package top
 
-import chipsalliance.rocketchip.config.{Config, Parameters}
+import org.chipsalliance.cde.config.{Config, Parameters}
 import system.SoCParamsKey
-import xiangshan.{DebugOptionsKey, XSTileKey}
+import xiangshan.XSTileKey
+import xs.utils.perf.DebugOptionsKey
 
 import scala.annotation.tailrec
 import scala.sys.exit
@@ -36,6 +37,7 @@ object ArgParser {
       |--enable-difftest
       |--enable-log
       |--disable-perf
+      |--prefix
       |""".stripMargin
 
   def getConfigByName(confString: String): Parameters = {
@@ -88,6 +90,10 @@ object ArgParser {
         case "--enable-topdown" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableTopDown = true)
+          }), tail)
+        case "--prefix" :: confString :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case PrefixKey => confString
           }), tail)
         case option :: tail =>
           // unknown option, maybe a firrtl option, skip

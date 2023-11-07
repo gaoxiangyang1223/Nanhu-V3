@@ -16,7 +16,7 @@
 
 package xiangshan.backend.rob
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import difftest._
@@ -26,6 +26,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.writeback._
 import xiangshan.frontend.FtqPtr
+import xs.utils.perf.HasPerfLogging
 import xs.utils._
 
 class RobPtr(implicit p: Parameters) extends CircularQueuePtr[RobPtr](
@@ -77,7 +78,7 @@ class RobEnqIO(implicit p: Parameters) extends XSBundle {
   val resp = Vec(RenameWidth, Output(new RobPtr))
 }
 
-class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfLogging {
   val io = IO(new Bundle {
     // for commits/flush
     val state = Input(UInt(2.W))
@@ -169,7 +170,7 @@ class Rob(implicit p: Parameters) extends LazyModule with HasXSParameter {
 }
 
 class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
-  with HasXSParameter with HasCircularQueuePtrHelper with HasPerfEvents {
+  with HasXSParameter with HasCircularQueuePtrHelper with HasPerfEvents with HasPerfLogging {
   require(outer.writebackNode.in.length == 1)
   private val writebackIn = outer.writebackNode.in.head._2._1 zip outer.writebackNode.in.head._1
   private val numWbPorts = writebackIn.length

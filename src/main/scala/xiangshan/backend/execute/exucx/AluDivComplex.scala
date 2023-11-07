@@ -19,7 +19,7 @@
  ****************************************************************************************/
 package xiangshan.backend.execute.exucx
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import freechips.rocketchip.diplomacy.LazyModule
 import xiangshan.FuType
@@ -32,7 +32,8 @@ class AluDivComplex(id: Int, bypassNum:Int)(implicit p:Parameters) extends Basic
   div.issueNode :*= issueNode
   writebackNode :=* alu.writebackNode
   writebackNode :=* div.writebackNode
-  lazy val module = new BasicExuComplexImp(this, bypassNum){
+  lazy val module = new Impl
+  class Impl extends BasicExuComplexImp(this, bypassNum){
     require(issueNode.in.length == 1)
     require(issueNode.out.length == 2)
     private val issueIn = issueNode.in.head._1

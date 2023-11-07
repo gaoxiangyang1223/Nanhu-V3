@@ -16,7 +16,7 @@
 
 package xiangshan.mem
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -29,6 +29,7 @@ import xiangshan.backend.execute.fu.csr.SdtrigExt
 import xiangshan.backend.issue.{RSFeedback, RSFeedbackType, RsIdx}
 import xiangshan.cache._
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
+import xs.utils.perf.HasPerfLogging
 
 class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val loadIn = ValidIO(new LqWriteBundle)
@@ -60,7 +61,7 @@ class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
 
 // Load Pipeline Stage 0
 // Generate addr, use addr to query DCache and DTLB
-class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParameters{
+class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParameters  with HasPerfLogging{
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new ExuInput))
     val out = Decoupled(new LsPipelineBundle)
@@ -164,7 +165,7 @@ class LoadUnit_S0(implicit p: Parameters) extends XSModule with HasDCacheParamet
 
 // Load Pipeline Stage 1
 // TLB resp (send paddr to dcache)
-class LoadUnit_S1(implicit p: Parameters) extends XSModule {
+class LoadUnit_S1(implicit p: Parameters) extends XSModule with HasPerfLogging {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val s1_kill = Input(Bool())
@@ -269,7 +270,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
 
 // Load Pipeline Stage 2
 // DCache resp
-class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
+class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper with HasPerfLogging {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val out = Decoupled(new LsPipelineBundle)
@@ -496,7 +497,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   XSPerfAccumulate("replay_from_fetch_load_vio", io.out.valid && debug_ldldVioReplay)
 }
 
-class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with HasPerfEvents with SdtrigExt {
+class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with HasPerfEvents with SdtrigExt with HasPerfLogging {
   val io = IO(new Bundle() {
     val ldin = Flipped(Decoupled(new ExuInput))
     val ldout = Decoupled(new ExuOutput)
@@ -706,7 +707,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   when (load_s2_leftFire) { load_s2_valid_vec := 0x3f.U(6.W)}
   when (load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect)) { load_s2_valid_vec := 0x0.U(6.W) }
   assert(RegNext(load_s2.io.in.valid === load_s2_valid_vec(0)))
-  io.lsq.loadIn.bits.lq_data_wen_dup := load_s2_valid_vec.asBools()
+  io.lsq.loadIn.bits.lq_data_wen_dup := load_s2_valid_vec.asBools
 
   // s2_dcache_require_replay signal will be RegNexted, then used in s3
   io.lsq.s2_dcache_require_replay := load_s2.io.s2_dcache_require_replay

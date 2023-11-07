@@ -16,7 +16,7 @@
 
 package xiangshan.backend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
@@ -32,6 +32,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.backend.issue.DqDispatchNode
 import xiangshan.mem.LsqEnqIO
 import xs.utils._
+import xs.utils.perf.HasPerfLogging
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
@@ -49,6 +50,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   with HasXSParameter
   with HasCircularQueuePtrHelper
   with HasPerfEvents
+  with HasPerfLogging
 {
 
   val io = IO(new Bundle {

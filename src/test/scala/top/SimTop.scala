@@ -16,18 +16,15 @@
 
 package top
 
-import chipsalliance.rocketchip.config.{Config, Parameters}
+import org.chipsalliance.cde.config._
 import chisel3.stage.ChiselGeneratorAnnotation
 import chisel3._
 import device.{AXI4RAMWrapper, SimJTAG}
-import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule, LazyModuleImp}
-import xs.utils.GTimer
-import xiangshan.{DebugOptions, DebugOptionsKey}
-import chipsalliance.rocketchip.config._
-import freechips.rocketchip.devices.debug._
+import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
+import xs.utils.{FileRegisters, GTimer}
 import difftest._
-import freechips.rocketchip.util.ElaborationArtefacts
-import top.TopMain.writeOutputFile
+import circt.stage.FirtoolOption
+import xs.utils.perf.DebugOptionsKey
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
@@ -86,36 +83,39 @@ class SimTop(implicit p: Parameters) extends Module {
     io.memAXI <> soc.memory
   }
 
-  if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug)) {
-    val timer = GTimer()
-    val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
-    ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
-    ExcitingUtils.addSource(timer, "logTimestamp")
-  }
-
   if (!debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug) {
-    val clean = io.perfInfo.clean
-    val dump = io.perfInfo.dump
-    ExcitingUtils.addSource(clean, "XSPERF_CLEAN")
-    ExcitingUtils.addSource(dump, "XSPERF_DUMP")
+    val timer = Wire(UInt(64.W))
+    val logEnable = Wire(Bool())
+    val clean = Wire(Bool())
+    val dump = Wire(Bool())
+    timer := GTimer()
+    logEnable := (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
+    clean := RegNext(io.perfInfo.clean, false.B)
+    dump := io.perfInfo.dump
+    dontTouch(timer)
+    dontTouch(logEnable)
+    dontTouch(clean)
+    dontTouch(dump)
   }
-
-  // Check and dispaly all source and sink connections
-  ExcitingUtils.fixConnections()
-  ExcitingUtils.checkAndDisplay()
 }
 
 object SimTop extends App {
-  override def main(args: Array[String]): Unit = {
-    // Keep this the same as TopMain except that SimTop is used here instead of XSTop
-    val (config, firrtlOpts) = ArgParser.parse(args)
-    XiangShanStage.execute(firrtlOpts, Seq(
-      ChiselGeneratorAnnotation(() => {
-        DisableMonitors(p => new SimTop()(p))(config)
-      })
-    ))
-    ElaborationArtefacts.files.foreach{ case (extension, contents) =>
-      writeOutputFile("./build", s"XSTop.${extension}", contents())
-    }
-  }
+  // Keep this the same as TopMain except that SimTop is used here instead of XSTop
+  val (config, firrtlOpts) = ArgParser.parse(args)
+  xsphase.PrefixHelper.prefix = config(PrefixKey)
+  (new XiangShanStage).execute(firrtlOpts, Seq(
+    FirtoolOption("-O=release"),
+    FirtoolOption("--disable-all-randomization"),
+    FirtoolOption("--disable-annotation-unknown"),
+    FirtoolOption("--strip-debug-info"),
+    FirtoolOption("--lower-memories"),
+    FirtoolOption("--lowering-options=noAlwaysComb," +
+      " disallowPortDeclSharing, disallowLocalVariables," +
+      " emittedLineLength=120, explicitBitcast, locationInfoStyle=plain," +
+      " disallowExpressionInliningInPorts, disallowMuxInlining"),
+    ChiselGeneratorAnnotation(() => {
+      DisableMonitors(p => new SimTop()(p))(config)
+    })
+  ))
+  FileRegisters.write(filePrefix = config(PrefixKey) + "XSTop.")
 }

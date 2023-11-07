@@ -22,7 +22,7 @@ package xiangshan.backend.regfile
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3.experimental.prefix
 import difftest.{DifftestArchFpRegState, DifftestArchIntRegState, DifftestFpWriteback, DifftestIntWriteback}
 import xiangshan.{ExuInput, FuType, HasXSParameter, MicroOp, Redirect, SrcType}
@@ -36,7 +36,9 @@ class RegFileTop(implicit p:Parameters) extends LazyModule with HasXSParameter{
   val issueNode = new RegFileNode
   val writebackNode = new WriteBackSinkNode(WriteBackSinkParam("RegFile Top", WriteBackSinkType.regFile))
 
-  lazy val module = new LazyModuleImp(this) {
+  lazy val module = new Impl
+
+  class Impl extends LazyModuleImp(this) {
     val pcReadNum:Int = issueNode.out.count(_._2._2.hasJmp) * 2 + issueNode.out.count(_._2._2.hasLoad) + + issueNode.out.count(_._2._2.hasSpecialLoad)
     println("\nRegfile Configuration:")
     println(s"PC read num: $pcReadNum \n")

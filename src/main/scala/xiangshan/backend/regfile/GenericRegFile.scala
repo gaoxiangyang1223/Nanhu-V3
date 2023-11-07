@@ -23,7 +23,7 @@ import chisel3._
 import chisel3.experimental.prefix
 import chisel3.util._
 import xiangshan.{ExuInput, Redirect, SrcType, XSBundle, XSModule}
-import freechips.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.issue.RsIdx
 
 class WritePort(dataWidth:Int, hasMask:Boolean)(implicit p: Parameters) extends XSBundle {

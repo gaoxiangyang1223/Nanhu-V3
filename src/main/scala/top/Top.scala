@@ -21,25 +21,41 @@ import xiangshan._
 import utils._
 import system._
 import chisel3.stage.ChiselGeneratorAnnotation
-import chipsalliance.rocketchip.config._
+import circt.stage.FirtoolOption
+import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.jtag.JTAGIO
-import freechips.rocketchip.util.{ElaborationArtefacts, HasRocketChipStageUtils}
 import huancun.{HCCacheParamsKey, HuanCun}
-import xs.utils.{ResetGen, DFTResetSignals}
+import xs.utils.{DFTResetSignals, FileRegisters, ResetGen}
 import xs.utils.sram.BroadCastBundle
+import xs.utils.perf.DebugOptionsKey
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
-  with BindingScope
-{
-  val misc = LazyModule(new SoCMisc())
+  with BindingScope {
+
   lazy val dts = DTS(bindingTree)
   lazy val json = JSON(bindingTree)
 }
 
-class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
-{
+class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter {
+  println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
+
+  val core_with_l2 = tiles.zipWithIndex.map({ case (coreParams, idx) =>
+    LazyModule(new XSTile(s"XSTop_XSTile_")(p.alterPartial({
+      case XSCoreParamsKey => coreParams
+    })))
+  })
+
+  val misc = LazyModule(new SoCMisc())
+
+  val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
+    LazyModule(new HuanCun("L3_")(new Config((_, _, _) => {
+      case HCCacheParamsKey => l3param.copy(enableTopDown = debugOpts.EnableTopDown)
+      case DebugOptionsKey => p(DebugOptionsKey)
+    })))
+  )
+
   ResourceBinding {
     val width = ResourceInt(2)
     val model = "freechips,rocketchip-unknown"
@@ -49,28 +65,21 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     Resource(ResourceAnchors.root, "width").bind(width)
     Resource(ResourceAnchors.soc, "width").bind(width)
     Resource(ResourceAnchors.cpus, "width").bind(ResourceInt(1))
-    def bindManagers(xbar: TLNexusNode) = {
-      ManagerUnification(xbar.edges.in.head.manager.managers).foreach{ manager =>
+
+    def bindManagers(xbar: TLNexusNode): Unit = {
+      ManagerUnification(xbar.edges.in.head.manager.managers).foreach { manager =>
         manager.resources.foreach(r => r.bind(manager.toResource))
       }
     }
+
     bindManagers(misc.l3_xbar.asInstanceOf[TLNexusNode])
     bindManagers(misc.peripheralXbar.asInstanceOf[TLNexusNode])
   }
 
-  println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
-
-  val core_with_l2 = tiles.zipWithIndex.map({case (coreParams,idx) =>
-    LazyModule(new XSTile(s"XSTop_XSTile_")(p.alterPartial({
-      case XSCoreParamsKey => coreParams
-    })))
-  })
-
-  val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
-    LazyModule(new HuanCun("XSTop_L3_")(new Config((_, _, _) => {
-      case HCCacheParamsKey => l3param.copy(enableTopDown = debugOpts.EnableTopDown)
-    })))
-  )
+  l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar))
+  l3cacheOpt.map(_.intnode.map(int => {
+    misc.plic.intnode := IntBuffer() := int
+  }))
 
   for (i <- 0 until NumCores) {
     core_with_l2(i).clint_int_sink := misc.clint.intnode
@@ -81,11 +90,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     misc.core_to_l3_ports(i) :=* core_with_l2(i).memory_port
   }
 
-  l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar))
-  l3cacheOpt.map(_.intnode.map(int => {
-    misc.plic.intnode := IntBuffer() := int
-  }))
-
   val core_rst_nodes = if(l3cacheOpt.nonEmpty && l3cacheOpt.get.rst_nodes.nonEmpty){
     l3cacheOpt.get.rst_nodes.get
   } else {
@@ -93,7 +97,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   }
 
   core_rst_nodes.zip(core_with_l2.map(_.core_reset_sink)).foreach({
-    case (source, sink) =>  sink := source
+    case (source, sink) => sink := source
   })
 
   l3cacheOpt match {
@@ -102,11 +106,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     case None =>
   }
 
-  lazy val module = new LazyRawModuleImp(this) {
-    ElaborationArtefacts.add("dts", dts)
-    ElaborationArtefacts.add("graphml", graphML)
-    ElaborationArtefacts.add("json", json)
-    ElaborationArtefacts.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
+  lazy val module = new Impl
+
+  class Impl extends LazyRawModuleImp(this) {
+    FileRegisters.add("dts", dts)
+    FileRegisters.add("graphml", graphML)
+    FileRegisters.add("json", json)
+    FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
 
     val dma = IO(Flipped(misc.dma.cloneType))
     val peripheral = IO(misc.peripheral.cloneType)
@@ -154,25 +160,29 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     dontTouch(io)
     dontTouch(peripheral)
     dontTouch(memory)
+    dontTouch(scan_mode)
+    dontTouch(dft_lgc_rst_n)
+    dontTouch(dft_mode)
+    dontTouch(dfx_reset)
     misc.module.ext_intrs := io.extIntrs
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
-      core.moduleInstance.io.hartId := i.U
-      core.moduleInstance.io.dfx_reset:= dfx_reset
-      io.riscv_halt(i) := core.moduleInstance.io.cpu_halt
+      core.module.io.hartId := i.U
+      core.module.io.dfx_reset := dfx_reset
+      io.riscv_halt(i) := core.module.io.cpu_halt
     }
 
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
       // tie off core soft reset
       for(node <- core_rst_nodes){
-        node.out.head._1 := false.B.asAsyncReset()
+        node.out.head._1 := false.B.asAsyncReset
       }
       if(l3cacheOpt.get.module.dfx_reset.isDefined) {
         l3cacheOpt.get.module.dfx_reset.get := dfx_reset
       }
     }
 
-    misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.moduleInstance.ireset.asBool)
+    misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.ireset.asBool)
     misc.module.debug_module_io.clock := io.clock
     misc.module.debug_module_io.reset := misc.module.reset
 
@@ -182,22 +192,22 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     misc.module.debug_module_io.debugIO.dmactiveAck := misc.module.debug_module_io.debugIO.dmactive
     // jtag connector
     misc.module.debug_module_io.debugIO.systemjtag.foreach { x =>
-      x.jtag        <> io.systemjtag.jtag
-      x.reset       := jtag_reset_sync
-      x.mfr_id      := io.systemjtag.mfr_id
+      x.jtag <> io.systemjtag.jtag
+      x.reset := jtag_reset_sync
+      x.mfr_id := io.systemjtag.mfr_id
       x.part_number := io.systemjtag.part_number
-      x.version     := io.systemjtag.version
+      x.version := io.systemjtag.version
     }
 
-    val mbistBroadCastToTile = if(core_with_l2.head.moduleInstance.dft.isDefined) {
+    val mbistBroadCastToTile = if (core_with_l2.head.module.dft.isDefined) {
       val res = Some(Wire(new BroadCastBundle))
-      core_with_l2.foreach(_.moduleInstance.dft.get := res.get)
+      core_with_l2.foreach(_.module.dft.get := res.get)
       res
     } else {
       None
     }
-    val mbistBroadCastToL3 = if(l3cacheOpt.isDefined) {
-      if(l3cacheOpt.get.module.dft.isDefined){
+    val mbistBroadCastToL3 = if (l3cacheOpt.isDefined) {
+      if (l3cacheOpt.get.module.dft.isDefined) {
         val res = Some(Wire(new BroadCastBundle))
         l3cacheOpt.get.module.dft.get := res.get
         res
@@ -224,25 +234,31 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     withClockAndReset(io.clock.asClock, reset_sync) {
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
-      val coreResetChain:Seq[Reset] = core_with_l2.map(_.moduleInstance.ireset)
+      val coreResetChain: Seq[Reset] = core_with_l2.map(_.module.ireset)
       val resetChain = Seq(misc.module.reset) ++ l3cacheOpt.map(_.module.reset) ++ coreResetChain
       val resetDftSigs = ResetGen.applyOneLevel(resetChain, reset_sync, !debugOpts.FPGAPlatform)
-      resetDftSigs:= dfx_reset
+      resetDftSigs := dfx_reset
     }
   }
 }
 
-object TopMain extends App with HasRocketChipStageUtils {
-  override def main(args: Array[String]): Unit = {
-    val (config, firrtlOpts) = ArgParser.parse(args)
-    val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
-    XiangShanStage.execute(firrtlOpts, Seq(
-      ChiselGeneratorAnnotation(() => {
-        soc.module
-      })
-    ))
-    ElaborationArtefacts.files.foreach{ case (extension, contents) =>
-      writeOutputFile("./build", s"XSTop.${extension}", contents())
-    }
-  }
+object TopMain extends App {
+  val (config, firrtlOpts) = ArgParser.parse(args)
+  xsphase.PrefixHelper.prefix = config(PrefixKey)
+  val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
+  (new XiangShanStage).execute(firrtlOpts, Seq(
+    FirtoolOption("-O=release"),
+    FirtoolOption("--disable-all-randomization"),
+    FirtoolOption("--disable-annotation-unknown"),
+    FirtoolOption("--strip-debug-info"),
+    FirtoolOption("--lower-memories"),
+    FirtoolOption("--lowering-options=noAlwaysComb," +
+      " disallowPortDeclSharing, disallowLocalVariables," +
+      " emittedLineLength=120, explicitBitcast, locationInfoStyle=plain," +
+      " disallowExpressionInliningInPorts, disallowMuxInlining"),
+    ChiselGeneratorAnnotation(() => {
+      soc.module
+    })
+  ))
+  FileRegisters.write(filePrefix = config(PrefixKey) + "XSTop.")
 }

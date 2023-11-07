@@ -21,12 +21,13 @@ package xiangshan.backend.dispatch
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import utils.HasPerfEvents
 import xiangshan._
+import xs.utils.perf.HasPerfLogging
 import xs.utils.{CircularQueuePtr, HasCircularQueuePtrHelper, ParallelPriorityEncoder, ParallelPriorityMux, UIntToMask}
 
-class DispatchQueueIO(enqNum: Int, deqNum: Int)(implicit p: Parameters) extends XSBundle {
+class DispatchQueueIO(enqNum: Int, deqNum: Int)(implicit p: Parameters) extends XSBundle{
   val enq = new Bundle {
     // output: dispatch queue can accept new requests
     val canAccept = Output(Bool())
@@ -74,7 +75,7 @@ class DispatchQueuePayload(entryNum:Int, enqNum:Int, deqNum:Int)(implicit p: Par
 }
 
 class DispatchQueue (size: Int, enqNum: Int, deqNum: Int)(implicit p: Parameters)
-  extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
+  extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents with HasPerfLogging{
   val io: DispatchQueueIO = IO(new DispatchQueueIO(enqNum, deqNum))
 
   private class DispatchQueuePtr extends CircularQueuePtr[DispatchQueuePtr](size)

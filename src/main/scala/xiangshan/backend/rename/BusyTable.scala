@@ -16,19 +16,21 @@
 
 package xiangshan.backend.rename
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xs.utils.ParallelOR
+import xs.utils.perf.HasPerfLogging
 
 class BusyTableReadIO(implicit p: Parameters) extends XSBundle {
   val req = Input(UInt(PhyRegIdxWidth.W))
   val resp = Output(Bool())
 }
 
-class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) extends XSModule with HasPerfEvents {
+class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) extends XSModule
+  with HasPerfEvents  with HasPerfLogging {
   val io = IO(new Bundle() {
     // set preg state to busy
     val allocPregs = Vec(RenameWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))

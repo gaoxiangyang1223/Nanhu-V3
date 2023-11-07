@@ -16,7 +16,7 @@
 
 package xiangshan.cache.mmu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -147,7 +147,6 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
    * +-------+----------+-------------+
    */
   // ptwl2: 8-way group-associated
-  val l2tlbParams.l2nWays = l2tlbParams.l2nWays
   val PtwL2SetNum = l2tlbParams.l2nSets
   val PtwL2SectorSize = blockBits /XLEN
   val PtwL2IdxLen = log2Up(PtwL2SetNum * PtwL2SectorSize)
@@ -156,7 +155,6 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen
 
   // ptwl3: 16-way group-associated
-  val l2tlbParams.l3nWays = l2tlbParams.l3nWays
   val PtwL3SetNum = l2tlbParams.l3nSets
   val PtwL3SectorSize =  blockBits / XLEN
   val PtwL3IdxLen = log2Up(PtwL3SetNum * PtwL3SectorSize)

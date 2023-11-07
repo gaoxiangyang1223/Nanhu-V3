@@ -16,7 +16,7 @@
 
 package  xiangshan.frontend.icache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.{DecoupledIO, _}
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
@@ -159,10 +159,10 @@ class ICacheMetaArray(parentName:String = "Unknown")(implicit p: Parameters) ext
   val port_1_read_1  = io.read.valid &&  io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
   val port_1_read_0  = io.read.valid && !io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
 
-  val port_0_read_0_reg = RegEnable(next = port_0_read_0, enable = io.read.fire())
-  val port_0_read_1_reg = RegEnable(next = port_0_read_1, enable = io.read.fire())
-  val port_1_read_1_reg = RegEnable(next = port_1_read_1, enable = io.read.fire())
-  val port_1_read_0_reg = RegEnable(next = port_1_read_0, enable = io.read.fire())
+  val port_0_read_0_reg = RegEnable(port_0_read_0,io.read.fire)
+  val port_0_read_1_reg = RegEnable(port_0_read_1,io.read.fire)
+  val port_1_read_1_reg = RegEnable(port_1_read_1,io.read.fire)
+  val port_1_read_0_reg = RegEnable(port_1_read_0,io.read.fire)
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
@@ -188,7 +188,7 @@ class ICacheMetaArray(parentName:String = "Unknown")(implicit p: Parameters) ext
     tagArray
   }
   val mbistTagPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-    Some(Module(new MBISTPipeline(2,s"${parentName}_mbistTagPipe")))
+    MBISTPipeline.PlaceMbistPipeline(1, s"${parentName}_mbistTagPipe")
   } else {
     None
   }
@@ -206,7 +206,7 @@ class ICacheMetaArray(parentName:String = "Unknown")(implicit p: Parameters) ext
       tag_sram_write(i).bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
 
       tagArrays(i).io.w.req.valid := RegNext(tag_sram_write(i).valid,init = false.B)
-      tagArrays(i).io.w.req.bits  := RegEnable(tag_sram_write(i).bits, enable =tag_sram_write(i).valid )
+      tagArrays(i).io.w.req.bits  := RegEnable(tag_sram_write(i).bits,tag_sram_write(i).valid )
     }
     else {
       tagArrays(i).io.r.req.valid := port_0_read_1 || port_1_read_1
@@ -215,7 +215,7 @@ class ICacheMetaArray(parentName:String = "Unknown")(implicit p: Parameters) ext
       tag_sram_write(i).bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx(highestIdxBit,1), waymask=io.write.bits.waymask)
 
       tagArrays(i).io.w.req.valid :=  RegNext(tag_sram_write(i).valid, init = false.B)
-      tagArrays(i).io.w.req.bits  := RegEnable(tag_sram_write(i).bits, enable =tag_sram_write(i).valid )
+      tagArrays(i).io.w.req.bits  := RegEnable(tag_sram_write(i).bits,tag_sram_write(i).valid )
 
     }  
   }
@@ -333,10 +333,10 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
 
   val write_data_bits = Wire(UInt(blockBits.W))
 
-  val port_0_read_0_reg = RegEnable(next = io.read.valid && io.read.bits.head.port_0_read_0, enable = io.read.fire())
-  val port_0_read_1_reg = RegEnable(next = io.read.valid && io.read.bits.head.port_0_read_1, enable = io.read.fire())
-  val port_1_read_1_reg = RegEnable(next = io.read.valid && io.read.bits.head.port_1_read_1, enable = io.read.fire())
-  val port_1_read_0_reg = RegEnable(next = io.read.valid && io.read.bits.head.port_1_read_0, enable = io.read.fire())
+  val port_0_read_0_reg = RegEnable(io.read.valid && io.read.bits.head.port_0_read_0,io.read.fire)
+  val port_0_read_1_reg = RegEnable(io.read.valid && io.read.bits.head.port_0_read_1,io.read.fire)
+  val port_1_read_1_reg = RegEnable(io.read.valid && io.read.bits.head.port_1_read_1,io.read.fire)
+  val port_1_read_0_reg = RegEnable(io.read.valid && io.read.bits.head.port_1_read_0,io.read.fire)
 
   //val bank_0_idx_vec = io.read.bits.map(copy =>  Mux(io.read.bits.dup_valids && copy.port_0_read_0, copy.vSetIdx(0), copy.vSetIdx(1)))
   //val bank_1_idx_vec = io.read.bits.map(copy =>  Mux(io.read.valid && copy.port_0_read_1, copy.vSetIdx(0), copy.vSetIdx(1)))
@@ -359,11 +359,6 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
 
     dataArray
   }
-  val mbistDataArrayPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-    Some(Module(new MBISTPipeline(2,s"${parentName}_mbistDataArrayPipe")))
-  } else {
-    None
-  }
 
   val data_sram_write = Wire(Vec(partWayNum,dataArrays.head.io.write.cloneType))
 
@@ -375,7 +370,7 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
     data_sram_write(i).bits.wmask    := io.write.bits.waymask.asTypeOf(Vec(partWayNum, Vec(pWay, Bool())))(i)
 
     dataArrays(i).io.write.valid := RegNext(data_sram_write(i).valid, init = false.B)
-    dataArrays(i).io.write.bits  := RegEnable(data_sram_write(i).bits, enable = data_sram_write(i).valid)
+    dataArrays(i).io.write.bits  := RegEnable(data_sram_write(i).bits,data_sram_write(i).valid)
   }
 
 
@@ -390,8 +385,6 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
   io.readResp.datas(0) := Mux( port_0_read_1_reg, read_datas(1) , read_datas(0))
   io.readResp.datas(1) := Mux( port_1_read_0_reg, read_datas(0) , read_datas(1))
 
-
-  // val write_data_code = Wire(UInt(dataCodeEntryBits.W))
   val write_bank_0 = WireInit(io.write.valid && !io.write.bits.bankIdx)
   val write_bank_1 = WireInit(io.write.valid &&  io.write.bits.bankIdx)
   
@@ -421,7 +414,7 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
   val dataresp = Wire(Vec(nWays,UInt(blockBits.W) ))
   dataresp := DontCare
 
-  val data_resp_way = RegEnable(dataresp(RegNext(io.cacheOp.req.bits.wayNum(4, 0))), enable = RegNext(cacheOpShouldResp, init = false.B))
+  val data_resp_way = RegEnable(dataresp(RegNext(io.cacheOp.req.bits.wayNum(4, 0))),RegNext(cacheOpShouldResp, init = false.B))
 
   for (w <- 0 until partWayNum) {
     when(io.cache_req_dup(w).valid){
@@ -433,7 +426,7 @@ class ICacheDataArray(parentName:String = "Unknown")(implicit p: Parameters) ext
           else      port.valid     :=  io.cache_req_dup(w).bits.bank_num(0)
           port.bits.ridx := io.cache_req_dup(w).bits.index(highestIdxBit,1)
         }
-        cacheOpShouldResp := dataArrays.head.io.read.req.map(_.fire()).reduce(_||_)
+        cacheOpShouldResp := dataArrays.head.io.read.req.map(_.fire).reduce(_||_)
         dataresp :=Mux(io.cache_req_dup(w).bits.bank_num(0).asBool,  read_datas(1),  read_datas(0))
       }
       when(CacheInstrucion.isWriteData(io.cache_req_dup(w).bits.opCode)){
@@ -515,7 +508,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val probeQueue     = Module(new ICacheProbeQueue(edge))
   val prefetchPipe    = Module(new IPrefetchPipe)
   val mbistTagPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-    Some(Module(new MBISTPipeline(3,s"${outer.parentName}_mbistPipe")))
+    MBISTPipeline.PlaceMbistPipeline(2, s"${outer.parentName}_mbistPipe")
   } else {
     None
   }
@@ -584,18 +577,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   //notify IFU that Icache pipeline is available
   io.toIFU := mainPipe.io.fetch.req.ready
-
-  // tlb_req_arb.io.in(0) <> mainPipe.io.itlb(0).req
-  // tlb_req_arb.io.in(1) <> prefetchPipe.io.iTLBInter.req
-  // io.itlb(0).req       <>    tlb_req_arb.io.out
-
-  // mainPipe.io.itlb(0).resp  <>  io.itlb(0).resp
-  // prefetchPipe.io.iTLBInter.resp  <>  io.itlb(0).resp
-
-  // when(mainPipe.io.itlb(0).req.fire() && prefetchPipe.io.iTLBInter.req.fire())
-  // {
-  //   assert(false.B, "Both mainPipe ITLB and prefetchPipe ITLB fire!")
-  // }
 
   io.itlb(0)        <>    mainPipe.io.itlb(0)
   io.itlb(1)        <>    mainPipe.io.itlb(1)
@@ -697,7 +678,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   } .elsewhen (bus.d.bits.opcode === TLMessages.ReleaseAck) {
     releaseUnit.io.mem_grant <> bus.d
   } .otherwise {
-    assert (!bus.d.fire())
+    assert (!bus.d.fire)
   }
 
   val perfEvents = Seq(
@@ -772,7 +753,7 @@ class ICachePartWayArray[T <: Data](gen: T, pWay: Int, parentName:String = "Unkn
       parentName = parentName + s"bank${bank}_"
     ))
     val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
-      Some(Module(new MBISTPipeline(1,s"${parentName}_mbistPipe${bank}")))
+      MBISTPipeline.PlaceMbistPipeline(1, s"${parentName}_mbistPipe${bank}")
     } else {
       None
     }
@@ -782,12 +763,12 @@ class ICachePartWayArray[T <: Data](gen: T, pWay: Int, parentName:String = "Unkn
 
     if(bank == 0) sramBank.io.w.req.valid := io.write.valid && !io.write.bits.wbankidx
     else sramBank.io.w.req.valid := io.write.valid && io.write.bits.wbankidx
-    sramBank.io.w.req.bits.apply(data=io.write.bits.wdata, setIdx=io.write.bits.widx, waymask=io.write.bits.wmask.asUInt())
+    sramBank.io.w.req.bits.apply(data=io.write.bits.wdata, setIdx=io.write.bits.widx, waymask=io.write.bits.wmask.asUInt)
 
     sramBank
   }
 
-  io.read.req.map(_.ready := !io.write.valid && srams.map(_.io.r.req.ready).reduce(_&&_))
+  io.read.req.foreach(_.ready := !io.write.valid && srams.map(_.io.r.req.ready).reduce(_&&_))
 
   io.read.resp.rdata := VecInit(srams.map(bank => bank.io.r.resp.asTypeOf(Vec(pWay,gen))))
 

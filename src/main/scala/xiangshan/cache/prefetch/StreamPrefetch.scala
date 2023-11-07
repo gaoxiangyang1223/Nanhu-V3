@@ -16,12 +16,13 @@
 
 package xiangshan.cache.prefetch
 
-import chipsalliance.rocketchip.config.{Parameters, Field}
+import org.chipsalliance.cde.config.{Parameters, Field}
 import chisel3._
 import chisel3.util._
 import xiangshan.cache.mmu.{HasTlbConst}
 import utils._
 import xs.utils._
+import xs.utils.perf.HasPerfLogging
 
 case object StreamParamsKey extends Field[StreamPrefetchParameters]
 
@@ -98,7 +99,7 @@ class StreamBufferAlloc(implicit p: Parameters) extends StreamPrefetchReq {
 }
 
 
-class StreamBuffer(implicit p: Parameters) extends PrefetchModule with HasTlbConst {
+class StreamBuffer(implicit p: Parameters) extends PrefetchModule with HasTlbConst with HasPerfLogging {
   val io = IO(new Bundle {
     val streamBufId = Input(UInt(log2Up(streamCnt).W))
     val addrs = Vec(streamParams.streamSize, ValidIO(UInt(PAddrBits.W)))
@@ -195,19 +196,19 @@ class StreamBuffer(implicit p: Parameters) extends PrefetchModule with HasTlbCon
   val finishs = Wire(Vec(streamSize, DecoupledIO(new StreamPrefetchFinish)))
   (0 until streamSize).foreach{ i =>
     when (state(i) === s_req) {
-      when (reqs(i).fire()) {
+      when (reqs(i).fire) {
         state(i) := s_resp
       }
     }
 
     when (state(i) === s_resp) {
-      when (resps(i).fire()) {
+      when (resps(i).fire) {
         state(i) := s_finish
       }
     }
 
     when (state(i) === s_finish) {
-      when (finishs(i).fire()) {
+      when (finishs(i).fire) {
         state(i) := s_idle
         valid(i) := true.B
       }
@@ -297,7 +298,7 @@ object ParallelMin {
   }
 }
 
-class StreamPrefetch(implicit p: Parameters) extends PrefetchModule {
+class StreamPrefetch(implicit p: Parameters) extends PrefetchModule with HasPerfLogging {
   val io = IO(new StreamPrefetchIO)
 
   require(streamParams.blockBytes > 0)

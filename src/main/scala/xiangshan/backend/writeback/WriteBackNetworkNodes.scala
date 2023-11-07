@@ -18,7 +18,7 @@
  * Date: 2023-06-19
  ****************************************************************************************/
 package xiangshan.backend.writeback
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy._
 import chisel3._
 import chisel3.internal.sourceinfo.SourceInfo

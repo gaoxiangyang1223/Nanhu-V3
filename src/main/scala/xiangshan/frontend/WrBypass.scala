@@ -15,16 +15,17 @@
 ***************************************************************************************/
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
 import utils._
 import xiangshan.cache.mmu.CAMTemplate
 import xs.utils.CircularQueuePtr
+import xs.utils.perf.HasPerfLogging
 
 class WrBypass[T <: Data](gen: T, val numEntries: Int, val idxWidth: Int,
-  val numWays: Int = 1, val tagWidth: Int = 0)(implicit p: Parameters) extends XSModule {
+  val numWays: Int = 1, val tagWidth: Int = 0)(implicit p: Parameters) extends XSModule with HasPerfLogging {
   require(numEntries >= 0)
   require(idxWidth > 0)
   require(numWays >= 1)

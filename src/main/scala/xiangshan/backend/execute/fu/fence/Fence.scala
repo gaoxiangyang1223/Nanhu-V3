@@ -16,7 +16,7 @@
 
 package xiangshan.backend.execute.fu.fence
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.ExceptionNO.illegalInstr
@@ -67,7 +67,7 @@ class Fence(implicit p: Parameters) extends FUWithRedirect {
 
   private val sbuffer = toSbuffer.flushSb
   private val sbEmpty = toSbuffer.sbIsEmpty
-  private val uop = RegEnable(io.in.bits.uop, io.in.fire())
+  private val uop = RegEnable(io.in.bits.uop, io.in.fire)
   private val valid = RegNext(io.in.fire, false.B)
   private val func = uop.ctrl.fuOpType
 
@@ -79,8 +79,8 @@ class Fence(implicit p: Parameters) extends FUWithRedirect {
   sfence.valid := state === s_tlb && !disableSfence
   sfence.bits.rs1  := uop.ctrl.imm(4, 0) === 0.U
   sfence.bits.rs2  := uop.ctrl.imm(9, 5) === 0.U
-  sfence.bits.addr := RegEnable(io.in.bits.src(0), io.in.fire())
-  sfence.bits.asid := RegEnable(io.in.bits.src(1), io.in.fire())
+  sfence.bits.addr := RegEnable(io.in.bits.src(0), io.in.fire)
+  sfence.bits.asid := RegEnable(io.in.bits.src(1), io.in.fire)
 
   switch(state){
     is(s_idle){

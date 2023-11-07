@@ -19,7 +19,7 @@
  ****************************************************************************************/
 package xiangshan.backend.rob
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3.util._
 import chisel3._
 import xiangshan.{ExceptionVec, Redirect, TriggerCf, XSBundle, XSModule}

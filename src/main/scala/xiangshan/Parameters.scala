@@ -16,7 +16,7 @@
 
 package xiangshan
 
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.execute.exublock.ExuParameters
@@ -33,6 +33,7 @@ import huancun.debug._
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
 import scala.math.min
+import xs.utils.perf.DebugOptionsKey
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
 
@@ -237,19 +238,6 @@ case class XSCoreParameters
   val HistoryLength: Int = allHistLens.max + numBr * FtqSize + 9 // 256 for the predictor configs now
   val maxRsEntryNum: Int = Seq(fpRsDepth, intRsDepth, memRsDepth).max
 }
-
-case object DebugOptionsKey extends Field[DebugOptions]
-
-case class DebugOptions
-(
-  FPGAPlatform: Boolean = false,
-  EnableDifftest: Boolean = false,
-  AlwaysBasicDiff: Boolean = false,
-  EnableDebug: Boolean = false,
-  EnablePerfDebug: Boolean = true,
-  UseDRAMSim: Boolean = false,
-  EnableTopDown: Boolean = false
-)
 
 trait HasXSParameter {
 

@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientStates._
@@ -26,6 +26,7 @@ import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermission
 import utils._
 import xs.utils._
 import xiangshan.L1CacheErrorInfo
+import xs.utils.perf.HasPerfLogging
 
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss = Bool() // only amo miss will refill in main pipe
@@ -96,7 +97,7 @@ class MainPipeStatus(implicit p: Parameters) extends DCacheBundle {
   val way_en = UInt(nWays.W)
 }
 
-class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
+class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents with HasPerfLogging {
   val io = IO(new Bundle() {
     // probe queue
     val probe_req = Flipped(DecoupledIO(new MainPipeReq))
@@ -265,7 +266,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   s1_s0_set_conflict := s1_valid_dup(1) && s0_idx === s1_idx
   s1_s0_set_conflict_store := s1_valid_dup(2) && store_idx === s1_idx
 
-  val meta_resp = Wire(Vec(nWays, (new Meta).asUInt()))
+  val meta_resp = Wire(Vec(nWays, (new Meta).asUInt))
   val tag_resp = Wire(Vec(nWays, UInt(tagBits.W)))
   val ecc_resp = Wire(Vec(nWays, UInt(eccTagBits.W)))
   meta_resp := Mux(RegNext(s0_fire), VecInit(io.meta_resp.map(_.asUInt)), RegNext(meta_resp))
@@ -1518,7 +1519,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   io.wb.bits.voluntary := s3_req_miss_dup_for_wb_valid || s3_req_replace_dup_for_wb_valid
   io.wb.bits.hasData := writeback_data_dup_for_wb_valid
   io.wb.bits.dirty := s3_coh_dup_for_wb_valid === ClientStates.Dirty
-  io.wb.bits.data := s3_data.asUInt()
+  io.wb.bits.data := s3_data.asUInt
   io.wb.bits.delay_release := s3_req_replace_dup_for_wb_valid
   io.wb.bits.miss_id := s3_req.miss_id
 

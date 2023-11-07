@@ -19,7 +19,7 @@
  ****************************************************************************************/
 package xiangshan.backend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
@@ -61,7 +61,9 @@ class ExecuteBlock(val parentName:String = "Unknown")(implicit p:Parameters) ext
   floatingReservationStation.wakeupNode := writebackNetwork.node
   integerReservationStation.wakeupNode := writebackNetwork.node
   memoryReservationStation.wakeupNode := writebackNetwork.node
-  lazy val module = new LazyModuleImp(this) with HasSoCParameter{
+  lazy val module = new Impl
+
+  class Impl extends LazyModuleImp(this) with HasSoCParameter{
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
       //Mem Block
@@ -135,6 +137,7 @@ class ExecuteBlock(val parentName:String = "Unknown")(implicit p:Parameters) ext
     memBlk.io.fenceToSbuffer <> intBlk.io.fenceio.sbuffer
     memBlk.io.sfence := intBlk.io.fenceio.sfence
     memBlk.io.tlbCsr <> intBlk.io.csrio.tlb
+    memBlk.io.hartId := io.hartId
 
     memBlk.io.perfEventsPTW := io.perfEventsPTW
     io.ptw <> memBlk.io.ptw
