@@ -28,6 +28,7 @@ import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.Ftq_RF_Components
 import xs.utils.{ParallelOperation, SignExt, XORFold}
+import xs.utils.perf.HasPerfLogging
 
 class RedirectSelectBundle(idxWidth:Int)(implicit p: Parameters) extends Bundle{
   val robIdx = new RobPtr
@@ -70,7 +71,7 @@ object RedirectGen{
   }
 }
 
-class RedirectGen(jmpRedirectNum:Int, aluRedirectNum:Int, memRedirectNum:Int)(implicit p: Parameters) extends XSModule{
+class RedirectGen(jmpRedirectNum:Int, aluRedirectNum:Int, memRedirectNum:Int)(implicit p: Parameters) extends XSModule with HasPerfLogging{
   require(jmpRedirectNum == 1)
   val io = IO(new Bundle{
     val jmpWbIn = Input(Vec(jmpRedirectNum, Flipped(ValidIO(new ExuOutput))))
@@ -141,4 +142,13 @@ class RedirectGen(jmpRedirectNum:Int, aluRedirectNum:Int, memRedirectNum:Int)(im
   io.memPredUpdate.bits.ldpc := RegEnable(XORFold(s1_pcReadReg(VAddrBits - 1, 1), MemPredPCWidth), shouldUpdateMdp)
   // store pc is ready 1 cycle after s1_isReplay is judged
   io.memPredUpdate.bits.stpc := XORFold(storePc(VAddrBits - 1, 1), MemPredPCWidth)
+
+  XSPerfAccumulate("total_redirect_num", io.redirectOut.valid)
+  XSPerfAccumulate("miss_pred_redirect_num", io.redirectOut.valid && io.redirectOut.bits.cfiUpdate.isMisPred)
+  XSPerfAccumulate("bad_taken_redirect_num", io.redirectOut.valid && io.redirectOut.bits.cfiUpdate.isMisPred && io.redirectOut.bits.cfiUpdate.taken)
+  XSPerfAccumulate("bad_not_taken_redirect_num", io.redirectOut.valid && io.redirectOut.bits.cfiUpdate.isMisPred && !io.redirectOut.bits.cfiUpdate.taken)
+  XSPerfAccumulate("load_store_redirect_num", io.redirectOut.valid && io.redirectOut.bits.isLoadStore)
+  XSPerfAccumulate("load_load_redirect_num", io.redirectOut.valid && io.redirectOut.bits.isLoadLoad)
+  XSPerfAccumulate("exception_redirect_num", io.redirectOut.valid && io.redirectOut.bits.isException)
+  XSPerfAccumulate("flush_redirect_num", io.redirectOut.valid && io.redirectOut.bits.isFlushPipe)
 }
