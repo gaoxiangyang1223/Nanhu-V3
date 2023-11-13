@@ -11,6 +11,7 @@ import freechips.rocketchip.tilelink._
 import xs.utils.tl.TLLogger
 import xs.utils.mbist.MBISTInterface
 import huancun.{HCCacheParamsKey, HuanCun}
+import coupledL2.{CoupledL2, L2ParamKey}
 import xs.utils.{ResetGen, DFTResetSignals}
 import system.HasSoCParameter
 import top.BusPerfMonitor
@@ -84,8 +85,8 @@ class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends 
   val core = LazyModule(new XSCore(parentName + "core_"))
   val misc = LazyModule(new XSTileMisc())
   val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
-    LazyModule(new HuanCun(parentName = parentName + "L2_")(new Config((_, _, _) => {
-      case HCCacheParamsKey => l2param.copy(enableTopDown = env.EnableTopDown)
+    LazyModule(new CoupledL2()(new Config((_, _, _) => {
+      case L2ParamKey => l2param.copy(hartIds = Seq(p(XSCoreParamsKey).HartId))
       case DebugOptionsKey => p(DebugOptionsKey)
     })))
   )
@@ -128,7 +129,7 @@ class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends 
     core.frontend.icache.clientNode
 
   val ptw_to_l2_buffers = if (!coreParams.softPTW) {
-    val (buffers, buf_node) = chainBuffer(5, "ptw_to_l2_buffer")
+    val (buffers, buf_node) = chainBuffer(2, "ptw_to_l2_buffer")
     misc.busPMU :=
       TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
       buf_node :=
@@ -139,10 +140,10 @@ class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends 
   l2cache match {
     case Some(l2) =>
       misc.l2_binder.get :*= l2.node :*= TLBuffer() :*= TLBuffer() :*= misc.l1_xbar
-      l2.pf_recv_node.map(recv => {
-        println("Connecting L1 prefetcher to L2!")
-        recv := core.exuBlock.memoryBlock.pf_sender_opt.get
-      })
+      l2.pf_recv_node.map {l2_node =>
+          println("Connecting L1 prefetcher to L2!")
+          core.exuBlock.memoryBlock.pf_sender_opt.map(sender => l2_node := sender)
+      }
     case None =>
   }
 
@@ -165,9 +166,12 @@ class XSTileImp(outer: XSTile) extends LazyModuleImp(outer) {
 
   outer.core.module.io.hartId := io.hartId
   outer.core.module.io.dfx_reset := io.dfx_reset
+  outer.l2cache.foreach(_.module.io.dfx_reset := io.dfx_reset)
   io.cpu_halt := outer.core.module.io.cpu_halt
+
   if(outer.l2cache.isDefined){
-    outer.core.module.io.perfEvents.zip(outer.l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
+    require(outer.core.module.io.perfEvents.length == outer.l2cache.get.module.io_perf.length)
+    outer.core.module.io.perfEvents.zip(outer.l2cache.get.module.io_perf).foreach(x => x._1.value := x._2.value)
   }
   else {
     outer.core.module.io.perfEvents <> DontCare
@@ -175,21 +179,24 @@ class XSTileImp(outer: XSTile) extends LazyModuleImp(outer) {
 
   outer.misc.module.beu_errors.icache <> outer.core.module.io.beu_errors.icache
   outer.misc.module.beu_errors.dcache <> outer.core.module.io.beu_errors.dcache
-  if(outer.l2cache.isDefined){
-    outer.misc.module.beu_errors.l2.ecc_error.valid := outer.l2cache.get.module.io.ecc_error.valid
-    outer.misc.module.beu_errors.l2.ecc_error.bits := outer.l2cache.get.module.io.ecc_error.bits
-  } else {
-    outer.misc.module.beu_errors.l2 <> 0.U.asTypeOf(outer.misc.module.beu_errors.l2)
-  }
+  // TODO: replace Coupled L2
+  // if(outer.l2cache.isDefined){
+  //   outer.misc.module.beu_errors.l2.ecc_error.valid := outer.l2cache.get.module.io.ecc_error.valid
+  //   outer.misc.module.beu_errors.l2.ecc_error.bits := outer.l2cache.get.module.io.ecc_error.bits
+  // } else {
+  //   outer.misc.module.beu_errors.l2 <> 0.U.asTypeOf(outer.misc.module.beu_errors.l2)
+  // }
+  outer.misc.module.beu_errors.l2 <> 0.U.asTypeOf(outer.misc.module.beu_errors.l2)
 
-  val mbistBroadCastToCore = if(outer.coreParams.hasMbist) {
+
+  private val mbistBroadCastToCore = if(outer.coreParams.hasMbist) {
     val res = Some(Wire(new BroadCastBundle))
     outer.core.module.dft.get := res.get
     res
   } else {
     None
   }
-  val mbistBroadCastToL2 = if(outer.coreParams.L2CacheParamsOpt.isDefined) {
+  private val mbistBroadCastToL2 = if(outer.coreParams.L2CacheParamsOpt.isDefined) {
     if(outer.coreParams.L2CacheParamsOpt.get.hasMbist){
       val res = Some(Wire(new BroadCastBundle))
       outer.l2cache.get.module.dft.get := res.get

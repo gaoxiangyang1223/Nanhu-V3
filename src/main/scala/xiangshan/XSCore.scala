@@ -79,7 +79,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val hartId = Input(UInt(64.W))
     val cpu_halt = Output(Bool())
     val l2_pf_enable = Output(Bool())
-    val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
+    val perfEvents = Input(Vec(numPCntL2 * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val dfx_reset = Input(new DFTResetSignals())
   })
@@ -140,7 +140,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   csrioIn.perf.perfEventsFrontend := frontend.getPerf
   csrioIn.perf.perfEventsCtrl     := ctrlBlock.getPerf
-  csrioIn.perf.perfEventsHc       := io.perfEvents
+  csrioIn.perf.perfEventsL2       := io.perfEvents
 
   csrioIn.fpu.fflags := ctrlBlock.io.robio.toCSR.fflags
   csrioIn.fpu.isIllegal := false.B

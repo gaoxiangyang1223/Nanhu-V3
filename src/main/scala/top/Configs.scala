@@ -16,6 +16,7 @@
 
 package top
 
+import axi2tl.{AXI2TLParam, AXI2TLParamKey}
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -32,15 +33,21 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.execute.exublock.ExuParameters
 import device.{EnableJtag, XSDebugModuleParams}
 import huancun._
-import xs.utils.perf.{DebugOptions, DebugOptionsKey}
+import coupledL2._
+import xs.utils.perf.DebugOptions
+import xiangshan.mem.prefetch.SMSParams
+import xs.utils.perf.DebugOptionsKey
 case object PrefixKey extends Field[String]
-class BaseConfig(n: Int) extends Config((site, here, up) => {
+class BaseConfig(n: Int, mbist:Boolean = false) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()
-  case SoCParamsKey => SoCParameters()
+  case SoCParamsKey => SoCParameters(
+    hasShareBus = mbist, hasMbist = mbist
+  )
   case PMParameKey => PMParameters()
   case XSTileKey => Seq.tabulate(n){
-    i => XSCoreParameters(HartId = i, hasMbist = false, hasShareBus = false)
+    i => XSCoreParameters(HartId = i, hasMbist = mbist, hasShareBus = mbist,
+    prefetcher = Some(SMSParams()))
   }
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
   case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
@@ -218,30 +225,54 @@ class WithNKBL2
     val upParams = up(XSTileKey)
     val l2sets = n * 1024 / banks / ways / 64
     upParams.map(p => p.copy(
-      L2CacheParamsOpt = Some(HCCacheParameters(
+      L2CacheParamsOpt = Some(L2Param(
         name = "L2",
-        level = 2,
+        // level = 2,
         ways = ways,
         sets = l2sets,
-        inclusive = inclusive,
-        alwaysReleaseData = alwaysReleaseData,
-        clientCaches = Seq(CacheParameters(
+        // inclusive = inclusive,
+        // alwaysReleaseData = alwaysReleaseData,
+        // clientCaches = Seq(CacheParameters(
+        //   "dcache",
+        //   sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
+        //   ways = p.dcacheParametersOpt.get.nWays + 2,
+        //   blockGranularity = log2Ceil(2 * p.dcacheParametersOpt.get.nSets / banks),
+        //   aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
+        // )),
+        clientCaches = Seq(L1Param(
           "dcache",
-          sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
-          ways = p.dcacheParametersOpt.get.nWays + 2,
-          blockGranularity = log2Ceil(2 * p.dcacheParametersOpt.get.nSets / banks),
+          sets = p.dcacheParametersOpt.get.nSets / banks,
+          ways = p.dcacheParametersOpt.get.nWays,
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
         )),
-        reqField = Seq(PreferCacheField()),
-        echoField = Seq(DirtyField()),
-        prefetch = Some(huancun.prefetch.PrefetchReceiverParams()),
-        enablePerf = true,
-        sramDepthDiv = 2,
-        tagECC = None,
-        dataECC = None,
-        hasShareBus = false,
-        hasMbist = false,
-        simulation = !site(DebugOptionsKey).FPGAPlatform
+        reqField = Seq(xs.utils.tl.ReqSourceField()),
+        echoField = Seq(coupledL2.DirtyField()),
+        elaboratedTopDown = false,
+        enablePerf = false,
+        hasMbist = p.hasMbist,
+        hasShareBus = p.hasShareBus,
+        prefetch = Some(coupledL2.prefetch.HyperPrefetchParams()),
+        /*
+        del L2 prefetche recv option, move into: prefetch =  PrefetchReceiverParams
+        prefetch options:
+          SPPParameters          => spp only
+          BOPParameters          => bop only
+          PrefetchReceiverParams => sms+bop
+          HyperPrefetchParams    => spp+bop+sms
+        */
+        // sppMultiLevelRefill = Some(coupledL2.prefetch.PrefetchReceiverParams()),
+        /*must has spp, otherwise Assert Fail
+        sppMultiLevelRefill options:
+        PrefetchReceiverParams() => spp has cross level refill
+        None                     => spp only refill L2
+        */
+        // prefetch = None
+        // enablePerf = true,
+        // sramDepthDiv = 2,
+        // tagECC = None,
+        // dataECC = None,
+        // hasShareBus = false,
+        // simulation = !site(DebugOptionsKey).FPGAPlatform
       )),
       L2NBanks = banks
     ))

@@ -1,18 +1,18 @@
 /***************************************************************************************
- * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
- * Copyright (c) 2020-2021 Peng Cheng Laboratory
- *
- * XiangShan is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- *
- * See the Mulan PSL v2 for more details.
- ***************************************************************************************/
+* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
+*
+* XiangShan is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
 
 import mill._
 import scalalib._
@@ -150,6 +150,30 @@ object huancun extends SbtModule with ScalafmtModule with CommonModule {
   override def moduleDeps = super.moduleDeps ++ Seq(rocketchip, xsutils)
 }
 
+object axi2tl extends CommonModule with SbtModule {
+
+  override def millSourcePath = os.pwd / "coupledL2" / "AXItoTL"
+
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketchip,
+    xsutils
+  )
+}
+
+object coupledL2 extends SbtModule with ScalafmtModule with CommonModule {
+
+  override def ivyDeps = Agg(getVersion("chisel"))
+
+  override def millSourcePath = os.pwd / "coupledL2"
+
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketchip,
+    huancun,
+    xsutils,
+    axi2tl
+  )
+}
+
 object XiangShan extends SbtModule with ScalafmtModule with CommonModule {
 
   override def millSourcePath = millOuterCtx.millSourcePath
@@ -166,7 +190,9 @@ object XiangShan extends SbtModule with ScalafmtModule with CommonModule {
     xsutils,
     huancun,
     difftest,
+    coupledL2,
     fudian,
+    axi2tl
   )
 
   object test extends SbtModuleTests with TestModule.ScalaTest {

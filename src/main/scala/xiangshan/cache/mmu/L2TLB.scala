@@ -38,8 +38,7 @@ class PTW(val parentName:String = "Unknown")(implicit p: Parameters) extends Laz
     clients = Seq(TLMasterParameters.v1(
       "ptw",
       sourceId = IdRange(0, MemReqWidth)
-    )),
-    requestFields = Seq(PreferCacheField())
+    ))
   )))
 
   lazy val module = new PTWImp(this)
@@ -249,6 +248,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   )._2
   mem.a.bits := memRead
   mem.a.valid := mem_arb.io.out.valid && !flush
+  mem.a.bits.user := DontCare
   mem.a.bits.user.lift(PreferCacheKey).foreach(_ := RegNext(io.csr.prefercache, true.B))
   mem.d.ready := true.B
   // mem -> data buffer
