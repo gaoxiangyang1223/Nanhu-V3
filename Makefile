@@ -143,6 +143,7 @@ clean:
 
 init:
 	git submodule update --init
+	cd coupledL2 && git submodule update --init AXItoTL
 	cd rocket-chip && git submodule update --init cde hardfloat
 
 bump:
