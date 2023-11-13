@@ -24,10 +24,9 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
 import chisel3.experimental.prefix
-import difftest.{DifftestArchFpRegState, DifftestArchIntRegState, DifftestFpWriteback, DifftestIntWriteback}
+import difftest._
 import xiangshan.{ExuInput, FuType, HasXSParameter, MicroOp, Redirect, SrcType}
 import xiangshan.frontend.Ftq_RF_Components
-import xiangshan.backend.execute.fu.fpu.FMAMidResult
 import xiangshan.backend.issue.RsIdx
 import xiangshan.backend.writeback.{WriteBackSinkNode, WriteBackSinkParam, WriteBackSinkType}
 import xs.utils.DelayN
@@ -199,32 +198,13 @@ class RegFileTop(implicit p:Parameters) extends LazyModule with HasXSParameter{
       debugFpRegfile.io.write.zip(fpRf.io.write ++ fpRf.io.bypassWrite).foreach({ case (a, b) => a := b })
       debugFpRegfile.io.read.zip(io.debug_fp_rat).foreach(e => e._1.addr := e._2)
 
-      debugIntRegfile.io.write.foreach(w => prefix("IntRf"){
-        val difftest = Module(new DifftestIntWriteback)
-        difftest.io.clock := clock
-        difftest.io.coreid := io.hartId
-        difftest.io.valid := w.en
-        difftest.io.dest := w.addr
-        difftest.io.data := w.data
-      })
-      debugFpRegfile.io.write.foreach(w => prefix("FpRf") {
-        val difftest = Module(new DifftestFpWriteback)
-        difftest.io.clock := clock
-        difftest.io.coreid := io.hartId
-        difftest.io.valid := w.en
-        difftest.io.dest := w.addr
-        difftest.io.data := w.data
-      })
+      val difftestArchInt = DifftestModule(new DiffArchIntRegState, delay = 2)
+      difftestArchInt.coreid := io.hartId
+      difftestArchInt.value := VecInit(debugIntRegfile.io.read.map(_.data))
 
-      val difftestArchInt = Module(new DifftestArchIntRegState)
-      difftestArchInt.io.clock := clock
-      difftestArchInt.io.coreid := io.hartId
-      difftestArchInt.io.gpr := DelayN(VecInit(debugIntRegfile.io.read.map(_.data)), 2)
-
-      val difftestArchFp = Module(new DifftestArchFpRegState)
-      difftestArchFp.io.clock := clock
-      difftestArchFp.io.coreid := io.hartId
-      difftestArchFp.io.fpr := DelayN(VecInit(debugFpRegfile.io.read.map(_.data)), 2)
+      val difftestArchFp = DifftestModule(new DiffArchFpRegState, delay = 2)
+      difftestArchFp.coreid := io.hartId
+      difftestArchFp.value := VecInit(debugFpRegfile.io.read.map(_.data))
     }
   }
 }
