@@ -133,13 +133,10 @@ sim-verilog: $(SIM_TOP_V)
 	find $(ABS_WORK_DIR)/build -name "*.v" > $(FILELIST)
 	find $(ABS_WORK_DIR)/build -name "*.sv" >> $(FILELIST)
 
-comp:
-	mill -i XiangShan.compile
-	mill -i XiangShan.test.compile
-
 clean:
 	$(MAKE) -C ./difftest clean
 	rm -rf ./build
+	rm -rf ./sim
 
 init:
 	git submodule update --init
@@ -148,6 +145,10 @@ init:
 
 bump:
 	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
+
+comp:
+	mill -i XiangShan.compile
+	mill -i XiangShan.test.compile
 
 bsp:
 	mill -i mill.bsp.BSP/install

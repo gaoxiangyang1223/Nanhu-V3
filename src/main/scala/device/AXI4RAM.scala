@@ -20,8 +20,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.ExtModule
-import freechips.rocketchip.amba.axi4.{AXI4EdgeParameters, AXI4MasterNode, AXI4SlaveNode}
-import freechips.rocketchip.diplomacy.{AddressSet, InModuleBody, LazyModule, LazyModuleImp, RegionType}
+import freechips.rocketchip.amba.axi4.AXI4SlaveNode
+import freechips.rocketchip.diplomacy.{AddressSet, LazyModule}
 import xs.utils._
 
 class RAMHelper(memByte: BigInt) extends ExtModule {
@@ -93,23 +93,14 @@ class AXI4RAM
   }
 }
 
-class AXI4RAMWrapper
-(snode: AXI4SlaveNode, memByte: Long, useBlackBox: Boolean = false)
-(implicit p: Parameters)
-  extends LazyModule {
-
-  val mnode = AXI4MasterNode(List(snode.in.head._2.master))
-
-  val portParam = snode.portParams.head
-  val slaveParam = portParam.slaves.head
-  val burstLen = portParam.maxTransfer / portParam.beatBytes
+class AXI4RAMWrapper (
+  slave: AXI4SlaveNode,
+  memByte: Long,
+  useBlackBox: Boolean = false
+ )(implicit p: Parameters) extends AXI4MemorySlave(slave, memByte, useBlackBox) {
   val ram = LazyModule(new AXI4RAM(
     slaveParam.address, memByte, useBlackBox,
     slaveParam.executable, portParam.beatBytes, burstLen
   ))
-  ram.node := mnode
-
-  val io_axi4 = InModuleBody{ mnode.makeIOs() }
-
-  lazy val module = new LazyModuleImp(this){}
+  ram.node := master
 }

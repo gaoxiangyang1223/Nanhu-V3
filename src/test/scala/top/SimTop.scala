@@ -16,10 +16,10 @@
 
 package top
 
-import org.chipsalliance.cde.config._
+import org.chipsalliance.cde.config.Parameters
 import chisel3.stage.ChiselGeneratorAnnotation
 import chisel3._
-import device.{AXI4RAMWrapper, SimJTAG}
+import device.{AXI4MemorySlave, SimJTAG}
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import xs.utils.{FileRegisters, GTimer}
 import difftest._
@@ -28,7 +28,6 @@ import xs.utils.perf.DebugOptionsKey
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
-  val useDRAMSim = debugOpts.UseDRAMSim
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
@@ -39,13 +38,14 @@ class SimTop(implicit p: Parameters) extends Module {
   val simMMIO = Module(l_simMMIO.module)
   l_simMMIO.io_axi4 <> soc.peripheral
 
-  if(!useDRAMSim){
-    val l_simAXIMem = LazyModule(new AXI4RAMWrapper(
-      l_soc.misc.memAXI4SlaveNode, 16L * 1024 * 1024 * 1024, useBlackBox = true
-    ))
-    val simAXIMem = Module(l_simAXIMem.module)
-    l_simAXIMem.io_axi4 <> soc.memory
-  }
+  val l_simAXIMem = AXI4MemorySlave(
+    l_soc.misc.memAXI4SlaveNode,
+    16L * 1024 * 1024 * 1024,
+    useBlackBox = true,
+    dynamicLatency = debugOpts.UseDRAMSim
+  )
+  val simAXIMem = Module(l_simAXIMem.module)
+  l_simAXIMem.io_axi4 <> soc.memory
 
   soc.io.clock := clock.asBool
   soc.io.reset := (reset.asBool || soc.io.debug_reset).asAsyncReset
@@ -74,14 +74,9 @@ class SimTop(implicit p: Parameters) extends Module {
     val logCtrl = new LogCtrlIO
     val perfInfo = new PerfInfoIO
     val uart = new UARTIO
-    val memAXI = if(useDRAMSim) soc.memory.cloneType else null
   })
 
   simMMIO.io.uart <> io.uart
-
-  if(useDRAMSim){
-    io.memAXI <> soc.memory
-  }
 
   if (!debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug) {
     val timer = Wire(UInt(64.W))
@@ -96,6 +91,10 @@ class SimTop(implicit p: Parameters) extends Module {
     dontTouch(logEnable)
     dontTouch(clean)
     dontTouch(dump)
+  }
+
+  if(merge.Merge.isEffective) {
+    merge.Merge.collect()
   }
 }
 
