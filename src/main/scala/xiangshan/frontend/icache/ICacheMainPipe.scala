@@ -294,7 +294,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasPerfLo
     * - get tlb resp data (exceptiong info and physical addresses)
     * - get Meta/Data SRAM read responses (latched for pipeline stop)
     * - tag compare/hit check
-
+    
     //TODO: use tlb resp data to check PMP
     ******************************************************************************
     */
@@ -341,19 +341,28 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasPerfLo
   val tlbExcpPF     = Mux(s1_tlb_use_latch, s1_tlb_latch_resp_pf, Mux(s1_tlb_miss,miss_tlbExcpPF,hit_tlbExcpPF ))
   val tlbExcpAF     = Mux(s1_tlb_use_latch, s1_tlb_latch_resp_af, Mux(s1_tlb_miss,miss_tlbExcpAF,hit_tlbExcpAF ))
 
+  //add sth
+  //send physical address to PMP
+  io.pmp.zipWithIndex.map { case (p, i) =>
+    p.req.valid := s1_valid && tlbRespAllValid && !missSwitchBit
+    p.req.bits.addr := tlbRespPAddr(i)
+    p.req.bits.size := 3.U // TODO
+    p.req.bits.cmd := TlbCmd.exec
+  }
+
   /** s1 hit check/tag compare */
   val s1_req_paddr              = tlbRespPAddr
   val s1_req_ptags              = VecInit(s1_req_paddr.map(get_phy_tag(_)))
 
   val s1_meta_ptags              = ResultHoldBypass(data = metaResp.tags, valid = RegNext(s0_fire))
-  val s1_meta_cohs               = ResultHoldBypass(data = metaResp.cohs, valid = RegNext(s0_fire))
   val s1_meta_errors             = ResultHoldBypass(data = metaResp.errors, valid = RegNext(s0_fire))
+  val s1_meta_v                  = ResultHoldBypass(data = metaResp.v, valid = RegNext(s0_fire))
 
   val s1_data_cacheline          = ResultHoldBypass(data = dataResp.datas, valid = RegNext(s0_fire))
   val s1_data_errorBits          = ResultHoldBypass(data = dataResp.codes, valid = RegNext(s0_fire))
 
   val s1_tag_eq_vec        = VecInit((0 until PortNumber).map( p => VecInit((0 until nWays).map( w =>  s1_meta_ptags(p)(w) ===  s1_req_ptags(p) ))))
-  val s1_tag_match_vec     = VecInit((0 until PortNumber).map( k => VecInit(s1_tag_eq_vec(k).zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && s1_meta_cohs(k)(w).isValid()})))
+  val s1_tag_match_vec     = VecInit((0 until PortNumber).map( k => VecInit(s1_tag_eq_vec(k).zipWithIndex.map{ case(way_tag_eq, w) => way_tag_eq && s1_meta_v(k)(w) })))
   val s1_tag_match         = VecInit(s1_tag_match_vec.map(vector => ParallelOR(vector)))
 
   val s1_port_hit          = VecInit(Seq(s1_tag_match(0) && s1_valid  && !tlbExcpPF(0) && !tlbExcpAF(0),  s1_tag_match(1) && s1_valid && s1_double_line && !tlbExcpPF(1) && !tlbExcpAF(1) ))
@@ -364,12 +373,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasPerfLo
   val replacers       = Seq.fill(PortNumber)(ReplacementPolicy.fromString(cacheParams.replacer,nWays,nSets/PortNumber))
   val s1_victim_oh    = ResultHoldBypass(data = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(s1_req_vsetIdx(i)))}), valid = RegNext(s0_fire))
 
-  val s1_victim_coh   = VecInit(s1_victim_oh.zipWithIndex.map {case(oh, port) => Mux1H(oh, s1_meta_cohs(port))})
-
-  when(s1_valid) {
-    assert(PopCount(s1_tag_match_vec(0)) <= 1.U && PopCount(s1_tag_match_vec(1)) <= 1.U, "Multiple hit in main pipe")
-  }
-
+  // when(s1_valid){
+  //   assert(PopCount(s1_tag_match_vec(0)) <= 1.U && PopCount(s1_tag_match_vec(1)) <= 1.U, s"Multiple hit in main pipe")
+  // }
 
   ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
 
@@ -411,7 +417,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasPerfLo
   s2_fire       := s2_valid && s2_fetch_finish && !io.respStall
 
   /** s2 data */
-  val mmio = fromPMP.map(port => port.mmio) // TODO: handle it
+  val mmio = RegEnable(VecInit(fromPMP.map(port => port.mmio)),s1_fire)  // TODO: handle it
 
   val (s2_req_paddr , s2_req_vaddr)   = (RegEnable( s1_req_paddr, s1_fire), RegEnable( s1_req_vaddr, s1_fire))
   val s2_req_vsetIdx  = RegEnable( s1_req_vsetIdx, s1_fire)
@@ -428,7 +434,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasPerfLo
 
   val s2_bank_miss    = RegEnable( s1_bank_miss, s1_fire)
   val s2_waymask      = RegEnable( s1_victim_oh, s1_fire)
-  val s2_victim_coh   = RegEnable( s1_victim_coh, s1_fire)
   val s2_tag_match_vec = RegEnable( s1_tag_match_vec, s1_fire)
 
   /** status imply that s2 is a secondary miss (no need to resend miss request) */
@@ -483,8 +488,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasPerfLo
   /** exception and pmp logic **/
   //PMP Result
   val pmpExcpAF = Wire(Vec(PortNumber, Bool()))
-  pmpExcpAF(0)  := fromPMP(0).instr
-  pmpExcpAF(1)  := fromPMP(1).instr && s2_double_line
+  pmpExcpAF(0)  := RegEnable(fromPMP(0).instr,s1_fire)
+  pmpExcpAF(1)  := RegEnable(fromPMP(1).instr && s2_double_line, s1_fire)
   //exception information
   //short delay exception signal
   val s2_except_pf        = RegEnable(tlbExcpPF, s1_fire)
@@ -496,15 +501,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasPerfLo
   val s2_except    = VecInit((0 until 2).map{i => s2_except_pf(i) || s2_except_tlb_af(i)})
   val s2_has_except = s2_valid && (s2_except_tlb_af.reduce(_||_) || s2_except_pf.reduce(_||_))
   //MMIO
-  val s2_mmio      = DataHoldBypass(io.pmp(0).resp.mmio && !s2_except_tlb_af(0) && !s2_except_pmp_af(0) && !s2_except_pf(0), RegNext(s1_fire)).asBool && s2_valid
- 
+  val mmio_judge   = RegEnable(io.pmp(0).resp.mmio,s1_fire)
+  val s2_mmio      = DataHoldBypass(mmio_judge && !s2_except_tlb_af(0) && !s2_except_pmp_af(0) && !s2_except_pf(0), RegNext(s1_fire)).asBool && s2_valid
+
   //send physical address to PMP
-  io.pmp.zipWithIndex.map { case (p, i) =>
-    p.req.valid := s2_valid && !missSwitchBit
-    p.req.bits.addr := s2_req_paddr(i)
-    p.req.bits.size := 3.U // TODO
-    p.req.bits.cmd := TlbCmd.exec
-  }
+  // io.pmp.zipWithIndex.map { case (p, i) =>
+  //   p.req.valid := s2_valid && !missSwitchBit
+  //   p.req.bits.addr := s2_req_paddr(i)
+  //   p.req.bits.size := 3.U // TODO
+  //   p.req.bits.cmd := TlbCmd.exec
+  // }
 
   /*** cacheline miss logic ***/
   val wait_idle :: wait_queue_ready :: wait_send_req  :: wait_two_resp :: wait_0_resp :: wait_1_resp :: wait_one_resp ::wait_finish :: wait_pmp_except :: Nil = Enum(9)
@@ -730,8 +736,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasPerfLo
       toMSHR(i).bits.paddr    := s2_req_paddr(i)
       toMSHR(i).bits.vaddr    := s2_req_vaddr(i)
       toMSHR(i).bits.waymask  := s2_waymask(i)
-      toMSHR(i).bits.coh      := s2_victim_coh(i)
-
 
       when(toMSHR(i).fire && missStateQueue(j)(i) === m_invalid){
         missStateQueue(j)(i)     := m_valid

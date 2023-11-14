@@ -27,7 +27,7 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
-import huancun.{AliasKey, DirtyKey, PreferCacheKey, PrefetchKey}
+import coupledL2.{AliasKey, DirtyKey, PrefetchKey}
 import xs.utils.FastArbiter
 import mem.AddPipelineReg
 import xs.utils.perf.HasPerfLogging
@@ -416,23 +416,15 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     lgSize = (log2Up(cfg.blockBytes)).U,
     growPermissions = grow_param
   )._2
-  acquireBlock.user := DontCare
-  acquireBlock.echo := DontCare
   val acquirePerm = edge.AcquirePerm(
     fromSource = io.id,
     toAddress = req.addr,
     lgSize = (log2Up(cfg.blockBytes)).U,
     growPermissions = grow_param
   )._2
-  acquirePerm.user := DontCare
-  acquirePerm.echo := DontCare
   io.mem_acquire.bits := Mux(full_overwrite, acquirePerm, acquireBlock)
-  // resolve cache alias by L2
-  io.mem_acquire.bits.user.lift(AliasKey).foreach( _ := req.vaddr(13, 12))
-  // trigger prefetch
-  io.mem_acquire.bits.user.lift(PrefetchKey).foreach(_ := Mux(io.l2_pf_store_only, req.isStore, true.B))
-  // prefer not to cache data in L2 by default
-  io.mem_acquire.bits.user.lift(PreferCacheKey).foreach(_ := false.B)
+  private val prefecthBit = Mux(io.l2_pf_store_only, req.isStore, true.B)
+  io.mem_acquire.bits.data := Cat(req.vaddr(13, 12), prefecthBit)
   require(nSets <= 256)
 
   io.mem_grant.ready := !w_grantlast && s_acquire
@@ -682,13 +674,13 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 
   if (env.EnableDifftest) {
-    val difftest = Module(new DifftestRefillEvent)
-    difftest.io.clock := clock
-    difftest.io.coreid := io.hartId
-    difftest.io.cacheid := 1.U
-    difftest.io.valid := io.refill_to_ldq.valid && io.refill_to_ldq.bits.hasdata && io.refill_to_ldq.bits.refill_done
-    difftest.io.addr := io.refill_to_ldq.bits.addr
-    difftest.io.data := io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.io.data)
+    val difftest = DifftestModule(new DiffRefillEvent)
+    difftest.coreid := io.hartId
+    difftest.index := 1.U
+    difftest.idtfr := 1.U
+    difftest.valid := io.refill_to_ldq.valid && io.refill_to_ldq.bits.hasdata && io.refill_to_ldq.bits.refill_done
+    difftest.addr := io.refill_to_ldq.bits.addr
+    difftest.data := io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.data)
   }
 
   XSPerfAccumulate("miss_req", io.req.fire)

@@ -1,18 +1,18 @@
-/***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+/** *************************************************************************************
+ * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ * http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ * ************************************************************************************* */
 
 package top
 
@@ -26,9 +26,10 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.jtag.JTAGIO
-import huancun.{HCCacheParamsKey, HuanCun}
 import xs.utils.{DFTResetSignals, FileRegisters, ResetGen}
 import xs.utils.sram.BroadCastBundle
+import huancun.{HCCacheParamsKey, HuanCun}
+import xs.utils.mbist.{MBISTInterface, MBISTPipeline}
 import xs.utils.perf.DebugOptionsKey
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
@@ -90,11 +91,24 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter {
     misc.core_to_l3_ports(i) :=* core_with_l2(i).memory_port
   }
 
-  val core_rst_nodes = if(l3cacheOpt.nonEmpty && l3cacheOpt.get.rst_nodes.nonEmpty){
-    l3cacheOpt.get.rst_nodes.get
-  } else {
-    core_with_l2.map(_ => BundleBridgeSource(() => Reset()))
+  (core_with_l2.head.l2cache.get.spp_send_node, core_with_l2.last.l2cache.get.spp_send_node) match {
+    case (Some(l2_0), Some(l2_1)) => {
+      val l3pf_RecvXbar = LazyModule(new coupledL2.prefetch.PrefetchReceiverXbar(NumCores))
+      for (i <- 0 until NumCores) {
+        println(s"Connecting L2 prefecher_sender_${i} to L3!")
+        l3pf_RecvXbar.inNode(i) := core_with_l2(i).l2cache.get.spp_send_node.get
+      }
+      l3cacheOpt.get.pf_l3recv_node.map(l3Recv => l3Recv := l3pf_RecvXbar.outNode.head)
+    }
+    case (_, _) => None
   }
+
+  // val core_rst_nodes = if(l3cacheOpt.nonEmpty && l3cacheOpt.get.rst_nodes.nonEmpty){
+  //   l3cacheOpt.get.rst_nodes.get
+  // } else {
+  //   core_with_l2.map(_ => BundleBridgeSource(() => Reset()))
+  // }
+  val core_rst_nodes = core_with_l2.map(_ => BundleBridgeSource(() => Reset()))
 
   core_rst_nodes.zip(core_with_l2.map(_.core_reset_sink)).foreach({
     case (source, sink) => sink := source
@@ -172,12 +186,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter {
       io.riscv_halt(i) := core.module.io.cpu_halt
     }
 
-    if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
-      // tie off core soft reset
-      for(node <- core_rst_nodes){
-        node.out.head._1 := false.B.asAsyncReset
-      }
-      if(l3cacheOpt.get.module.dfx_reset.isDefined) {
+    if (l3cacheOpt.isDefined) {
+      if (l3cacheOpt.get.module.dfx_reset.isDefined) {
         l3cacheOpt.get.module.dfx_reset.get := dfx_reset
       }
     }
@@ -222,16 +232,43 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter {
     } else {
       None
     }
-    if(dft.isDefined){
-      if(mbistBroadCastToTile.isDefined){
+    if (dft.isDefined) {
+      if (mbistBroadCastToTile.isDefined) {
         mbistBroadCastToTile.get := dft.get
       }
-      if(mbistBroadCastToL3.isDefined){
+      if (mbistBroadCastToL3.isDefined) {
         mbistBroadCastToL3.get := dft.get
       }
     }
 
+    /** ***************************************l3 & misc Mbist Share Bus************************************** */
     withClockAndReset(io.clock.asClock, reset_sync) {
+      val miscPipeLine = if (p(SoCParamsKey).hasMbist && p(SoCParamsKey).hasShareBus) {
+        MBISTPipeline.PlaceMbistPipeline(Int.MaxValue, s"MBIST_L3", true)
+      } else {
+        None
+      }
+      val miscIntf = if (p(SoCParamsKey).hasMbist && p(SoCParamsKey).hasShareBus) {
+        Some(miscPipeLine.zipWithIndex.map({ case (pip, idx) => {
+          val params = pip.nodeParams
+          val intf = Module(new MBISTInterface(
+            params = Seq(params),
+            ids = Seq(pip.childrenIds),
+            name = s"MBIST_intf_misc",
+            pipelineNum = 1
+          ))
+          intf.toPipeline.head <> pip.mbist
+          intf.mbist := DontCare
+          pip.genCSV(intf.info, s"MBIST_MISC")
+          dontTouch(intf.mbist)
+          //TODO: add mbist controller connections here
+          intf
+        }
+        }))
+      } else {
+        None
+      }
+
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
       val coreResetChain: Seq[Reset] = core_with_l2.map(_.module.ireset)

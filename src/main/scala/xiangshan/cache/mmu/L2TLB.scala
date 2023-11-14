@@ -30,6 +30,7 @@ import huancun.{PreferCacheField, PreferCacheKey}
 import xiangshan.backend.execute.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.execute.fu.csr.HasCSRConst
 import xs.utils.{DataHoldBypass, DelayN, TimeOutAssert}
+import difftest._
 import xs.utils.perf.HasPerfLogging
 
 class PTW(val parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule with HasPtwConst {
@@ -38,8 +39,7 @@ class PTW(val parentName:String = "Unknown")(implicit p: Parameters) extends Laz
     clients = Seq(TLMasterParameters.v1(
       "ptw",
       sourceId = IdRange(0, MemReqWidth)
-    )),
-    requestFields = Seq(PreferCacheField())
+    ))
   )))
 
   lazy val module = new PTWImp(this)
@@ -249,6 +249,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   )._2
   mem.a.bits := memRead
   mem.a.valid := mem_arb.io.out.valid && !flush
+  mem.a.bits.user := DontCare
   mem.a.bits.user.lift(PreferCacheKey).foreach(_ := RegNext(io.csr.prefercache, true.B))
   mem.d.ready := true.B
   // mem -> data buffer
@@ -290,6 +291,20 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   cache.io.refill.bits.level_dup.map(_ := RegEnable(refill_level, refill_valid))
   cache.io.refill.bits.levelOH(refill_level, refill_valid)
   cache.io.refill.bits.sel_pte_dup.map(_ := RegNext(sel_data(refill_data_tmp.asUInt, req_addr_low(mem.d.bits.source))))
+
+  if (env.EnableDifftest) {
+    val difftest_ptw_addr = RegInit(VecInit(Seq.fill(MemReqWidth)(0.U(PAddrBits.W))))
+    when(mem.a.valid) {
+      difftest_ptw_addr(mem.a.bits.source) := mem.a.bits.address
+    }
+    val difftestRefill = DifftestModule(new DiffRefillEvent)
+    difftestRefill.coreid := p(XSCoreParamsKey).HartId.asUInt
+    difftestRefill.index := 2.U
+    difftestRefill.idtfr := 2.U
+    difftestRefill.valid := cache.io.refill.valid
+    difftestRefill.addr := difftest_ptw_addr(RegNext(mem.d.bits.source))
+    difftestRefill.data := refill_data.asTypeOf(difftestRefill.data)
+  }
 
   // pmp
   pmp_check(0).req <> ptw.io.pmp.req
@@ -464,19 +479,19 @@ class PTWWrapper(parentName:String = "Unknown")(implicit p: Parameters) extends 
   if (!useSoftPTW) {
     node := ptw.node
   }
+  lazy val module = new PTWWrapperImp(this)
+}
 
-  lazy val module = new Impl
-  class Impl extends LazyModuleImp(this) with HasPerfEvents {
-    val io = IO(new PtwIO)
-    val perfEvents = if (useSoftPTW) {
-      val fake_ptw = Module(new FakePTW())
-      io <> fake_ptw.io
-      Seq()
-    }
-    else {
-        io <> ptw.module.io
-        ptw.module.getPerfEvents
-    }
-    generatePerfEvent()
+class PTWWrapperImp(outer:PTWWrapper) extends LazyModuleImp(outer) with HasPerfEvents {
+  val io = IO(new PtwIO)
+  val perfEvents = if (outer.useSoftPTW) {
+    val fake_ptw = Module(new FakePTW())
+    io <> fake_ptw.io
+    Seq()
   }
+  else {
+    io <> outer.ptw.module.io
+    outer.ptw.module.getPerfEvents
+  }
+  generatePerfEvent()
 }

@@ -29,6 +29,7 @@ import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
 import huancun._
+import coupledL2._
 import huancun.debug._
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
@@ -212,7 +213,7 @@ case class XSCoreParameters
     nMissEntries = 2,
     nProbeEntries = 2,
     nPrefetchEntries = 2,
-    hasPrefetch = true,
+    hasPrefetch = false,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
@@ -222,13 +223,13 @@ case class XSCoreParameters
     nProbeEntries = 8,
     nReleaseEntries = 18
   )),
-  L2CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
+  L2CacheParamsOpt: Option[L2Param] = Some(L2Param(
     name = "l2",
-    level = 2,
+    // level = 2,
     ways = 8,
     sets = 1024,// default 512KB L2
-    hasShareBus = true,
-    prefetch = Some(huancun.prefetch.PrefetchReceiverParams())
+    // hasShareBus = true,
+    prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams())
   )),
   L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,
@@ -398,8 +399,8 @@ trait HasXSParameter {
   val LpvLength = 5
 
   val PCntIncrStep: Int = 6
-  val numPCntHc: Int = 25
   val numPCntPtw: Int = 19
+  val numPCntL2: Int = coreParams.L2CacheParamsOpt.get.getPCntAll
 
   val numCSRPCntFrontend = 8
   val numCSRPCntCtrl     = 8
