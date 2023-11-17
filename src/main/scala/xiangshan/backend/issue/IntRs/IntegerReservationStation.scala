@@ -149,16 +149,16 @@ class IntegerReservationStationImpl(outer:IntegerReservationStation, param:RsPar
   private val divExuCfg = divIssue.flatMap(_._2.exuConfigs).filter(_.exuType == ExuType.div).head
   private val jmpExuCfg = jmpIssue.flatMap(_._2.exuConfigs).filter(_.exuType == ExuType.jmp).head
 
-  private val aluSelectNetwork = Module(new SelectNetwork(param.bankNum, entriesNumPerBank, aluIssuePortNum, aluExuCfg, Some(s"IntegerAluSelectNetwork")))
-  private val mulSelectNetwork = Module(new SelectNetwork(param.bankNum, entriesNumPerBank, mulIssuePortNum, mulExuCfg, Some(s"IntegerMulSelectNetwork")))
-  private val divSelectNetwork = Module(new SelectNetwork(param.bankNum, entriesNumPerBank, divIssuePortNum, divExuCfg, Some(s"IntegerDivSelectNetwork")))
-  private val jmpSelectNetwork = Module(new SelectNetwork(param.bankNum, entriesNumPerBank, jmpIssuePortNum, jmpExuCfg, Some(s"IntegerJmpSelectNetwork")))
+  private val aluSelectNetwork = Module(new HybridSelectNetwork(param.bankNum, entriesNumPerBank, aluIssuePortNum, aluExuCfg, false, Some(s"IntegerAluSelectNetwork")))
+  private val mulSelectNetwork = Module(new HybridSelectNetwork(param.bankNum, entriesNumPerBank, mulIssuePortNum, mulExuCfg, false, Some(s"IntegerMulSelectNetwork")))
+  private val divSelectNetwork = Module(new SelectNetwork(param.bankNum, entriesNumPerBank, divIssuePortNum, divExuCfg, false, false, false, Some(s"IntegerDivSelectNetwork")))
+  private val jmpSelectNetwork = Module(new HybridSelectNetwork(param.bankNum, entriesNumPerBank, jmpIssuePortNum, jmpExuCfg, false, Some(s"IntegerJmpSelectNetwork")))
   divSelectNetwork.io.tokenRelease.get.zip(wakeup.filter(_._2.exuType == ExuType.div).map(_._1)).foreach({
     case(sink, source) =>
       sink.valid := source.valid && source.bits.uop.ctrl.rfWen
       sink.bits := source.bits.uop.pdest
   })
-  private val selectNetworkSeq = Seq(aluSelectNetwork, mulSelectNetwork, divSelectNetwork, jmpSelectNetwork)
+  private val selectNetworkSeq = Seq(aluSelectNetwork, mulSelectNetwork, jmpSelectNetwork)
   selectNetworkSeq.foreach(sn => {
     sn.io.selectInfo.zip(rsBankSeq).foreach({ case (sink, source) =>
       sink := source.io.selectInfo
@@ -166,6 +166,11 @@ class IntegerReservationStationImpl(outer:IntegerReservationStation, param:RsPar
     sn.io.earlyWakeUpCancel := io.earlyWakeUpCancel
     sn.io.redirect := io.redirect
   })
+  divSelectNetwork.io.selectInfo.zip(rsBankSeq).foreach({ case (sink, source) =>
+    sink := source.io.selectInfo
+  })
+  divSelectNetwork.io.earlyWakeUpCancel := io.earlyWakeUpCancel
+  divSelectNetwork.io.redirect := io.redirect
 
   private var busyTableReadIdx = 0
   allocateNetwork.io.enqFromDispatch.zip(enq).foreach({case(sink, source) =>
@@ -204,21 +209,21 @@ class IntegerReservationStationImpl(outer:IntegerReservationStation, param:RsPar
       val issueDriver = Module(new DecoupledPipeline(false, param.bankNum, entriesNumPerBank))
       issueDriver.io.redirect := io.redirect
       issueDriver.io.earlyWakeUpCancel := io.earlyWakeUpCancel
-      val selectRespArbiter = Module(new SelectRespArbiter(param.bankNum, entriesNumPerBank, 2))
-      selectRespArbiter.io.in(0) <> aluSelectNetwork.io.issueInfo(aluPortIdx)
+      val selectRespArbiter = Module(new SelectRespArbiter(param.bankNum, entriesNumPerBank, 2, false))
+      selectRespArbiter.io.in(1) <> aluSelectNetwork.io.issueInfo(aluPortIdx)
       internalAluWakeupSignals(aluWkpPortIdx) := WakeupQueue(aluSelectNetwork.io.issueInfo(aluPortIdx), aluSelectNetwork.cfg.latency, io.redirect, io.earlyWakeUpCancel, p)
       aluPortIdx = aluPortIdx + 1
       aluWkpPortIdx = aluWkpPortIdx + 1
       if (iss._2.isAluMul) {
-        selectRespArbiter.io.in(1) <> mulSelectNetwork.io.issueInfo(mulPortIdx)
+        selectRespArbiter.io.in(0) <> mulSelectNetwork.io.issueInfo(mulPortIdx)
         internalMulWakeupSignals(mulWkpPortIdx) := WakeupQueue(mulSelectNetwork.io.issueInfo(mulPortIdx), mulSelectNetwork.cfg.latency, io.redirect, io.earlyWakeUpCancel, p)
         mulPortIdx = mulPortIdx + 1
         mulWkpPortIdx = mulWkpPortIdx + 1
       } else if (iss._2.isAluDiv) {
-        selectRespArbiter.io.in(1) <> divSelectNetwork.io.issueInfo(divPortIdx)
+        selectRespArbiter.io.in(0) <> divSelectNetwork.io.issueInfo(divPortIdx)
         divPortIdx = divPortIdx + 1
       } else if(iss._2.isAluJmp){
-        selectRespArbiter.io.in(1) <> jmpSelectNetwork.io.issueInfo(jmpPortIdx)
+        selectRespArbiter.io.in(0) <> jmpSelectNetwork.io.issueInfo(jmpPortIdx)
         jmpPortIdx = jmpPortIdx + 1
       } else {
         require(false, "Unknown Exu complex!")
