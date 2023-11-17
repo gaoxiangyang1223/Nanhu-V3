@@ -28,6 +28,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp, ValName}
 import xiangshan.backend.issue._
 import xiangshan.backend.rename.BusyTable
 import xiangshan.backend.writeback.{WriteBackSinkNode, WriteBackSinkParam, WriteBackSinkType}
+import xs.utils.perf.HasPerfLogging
 
 class IntegerReservationStation(implicit p: Parameters) extends LazyModule with HasXSParameter{
   private val entryNum = p(XSCoreParamsKey).intRsDepth
@@ -41,7 +42,8 @@ class IntegerReservationStation(implicit p: Parameters) extends LazyModule with 
   lazy val module = new IntegerReservationStationImpl(this, rsParam)
 }
 
-class IntegerReservationStationImpl(outer:IntegerReservationStation, param:RsParam) extends LazyModuleImp(outer) with HasXSParameter {
+class IntegerReservationStationImpl(outer:IntegerReservationStation, param:RsParam) extends LazyModuleImp(outer)
+  with HasXSParameter with HasPerfLogging {
   require(param.bankNum == 4)
   require(param.entriesNum % param.bankNum == 0)
   private val issue = outer.issueNode.out.head._1 zip outer.issueNode.out.head._2._2
@@ -256,4 +258,6 @@ class IntegerReservationStationImpl(outer:IntegerReservationStation, param:RsPar
   wakeup.zipWithIndex.foreach({case((_, cfg), idx) =>
     println(s"Wake Port $idx ${cfg.name} of ${cfg.complexName} #${cfg.id}")
   })
+  XSPerfHistogram("issue_num", PopCount(issue.map(_._1.issue.fire)), true.B, 0, issue.length, 1)
+  XSPerfHistogram("valid_entries_num", PopCount(Cat(allocateNetwork.io.entriesValidBitVecList)), true.B, 0, param.entriesNum, 4)
 }
