@@ -25,7 +25,7 @@ import chisel3.util._
 import difftest.{DiffFpWriteback, DiffIntWriteback, DifftestModule}
 import xiangshan.backend.execute.exu.ExuType
 import freechips.rocketchip.diplomacy._
-import xiangshan.{HasXSParameter, MemPredUpdateReq, Redirect, XSCoreParamsKey}
+import xiangshan.{ExuOutput, HasXSParameter, MemPredUpdateReq, Redirect, XSCoreParamsKey}
 import xiangshan.frontend.Ftq_RF_Components
 class WriteBackNetwork(implicit p:Parameters) extends LazyModule{
   val node = new WriteBackNetworkNode
@@ -51,6 +51,19 @@ class WriteBackNetwork(implicit p:Parameters) extends LazyModule{
     private val redirectGen = Module(new RedirectGen(jmpNum, aluNum, lduNum))
     io.pcReadAddr := redirectGen.io.pcReadAddr
     redirectGen.io.pcReadData := io.pcReadData
+    private val localRedirectReg = Pipe(redirectGen.io.redirectOut)
+
+    private def PipeWithRedirect(in: Valid[ExuOutput], latency: Int, p: Parameters): Valid[ExuOutput] = {
+      require(latency > 0)
+      val res = Wire(Valid(new ExuOutput()(p)))
+      val realIn = if (latency == 1) in else PipeWithRedirect(in, latency - 1, p)
+      val validCond = realIn.valid && !realIn.bits.uop.robIdx.needFlush(localRedirectReg)
+      res.valid := RegNext(validCond, false.B)
+      res.bits := RegEnable(realIn.bits, validCond)
+      res.bits.redirectValid := RegNext(realIn.bits.redirectValid && !realIn.bits.redirect.robIdx.needFlush(localRedirectReg), false.B)
+      res.bits.redirect := RegEnable(realIn.bits.redirect, realIn.bits.redirectValid)
+      res
+    }
 
     private var jmpRedirectIdx = 0
     private var aluRedirectIdx = 0
@@ -69,7 +82,6 @@ class WriteBackNetwork(implicit p:Parameters) extends LazyModule{
         require(false, "Unexpected redirect out exu!")
       }
     })
-    private val localRedirectReg = Pipe(redirectGen.io.redirectOut)
     redirectGen.io.redirectIn := localRedirectReg
     io.redirectOut := redirectGen.io.redirectOut
     io.memPredUpdate := redirectGen.io.memPredUpdate
@@ -82,12 +94,11 @@ class WriteBackNetwork(implicit p:Parameters) extends LazyModule{
         val realSrc = WireInit(src)
         if(s._2._1.needWriteback && cfg.speculativeWakeup){
           val realValid = src.valid && !src.bits.uop.robIdx.needFlush(localRedirectReg)
-          realSrc.bits.uop := RegEnable(src.bits.uop, realValid)
-          realSrc.valid := RegNext(realValid, false.B) && !realSrc.bits.uop.robIdx.needFlush(localRedirectReg)
+          realSrc.bits.uop := RegEnable(src.bits.uop, src.valid)
+          realSrc.valid := RegNext(realValid, false.B)
         }
         if(s._2._1.isRob){
-          dst.bits := RegEnable(realSrc.bits, realSrc.valid)
-          dst.valid := RegNext(realSrc.valid, false.B) && !dst.bits.uop.robIdx.needFlush(localRedirectReg)
+          dst := PipeWithRedirect(realSrc, 2, p)
         } else {
           dst := realSrc
         }

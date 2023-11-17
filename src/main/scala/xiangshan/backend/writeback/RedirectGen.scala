@@ -25,9 +25,10 @@ import RedirectGen._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan._
 import xiangshan.backend.decode.ImmUnion
+import xiangshan.backend.issue.SelectPolicy
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.Ftq_RF_Components
-import xs.utils.{ParallelOperation, SignExt, XORFold}
+import xs.utils.{SignExt, XORFold}
 import xs.utils.perf.HasPerfLogging
 
 class RedirectSelectBundle(idxWidth:Int)(implicit p: Parameters) extends Bundle{
@@ -43,31 +44,17 @@ object RedirectGen{
     redirect.bits := exuOut.bits.redirect
     redirect
   }
-  private def oldestSelect(in0:Valid[RedirectSelectBundle], in1:Valid[RedirectSelectBundle], idxWidth:Int, p:Parameters):Valid[RedirectSelectBundle] = {
-    val res = Wire(Valid(new RedirectSelectBundle(idxWidth)(p)))
-    res.valid := in0.valid | in1.valid
-    res.bits := MuxLookup(Cat(in1.valid, in0.valid), in0.bits, Seq(
-      "b10".U -> in1.bits,
-      "b11".U -> Mux(in0.bits.robIdx < in1.bits.robIdx, in0.bits, in1.bits)
-    ))
-    res
-  }
 
-  def selectOldestRedirect(in: Seq[Valid[Redirect]], p:Parameters): (Valid[Redirect], UInt) = {
-    val idxWidth = in.length
-    val selectInfo = in.zipWithIndex.map({case(r, idx) =>
-      val res = Wire(Valid(new RedirectSelectBundle(idxWidth)(p)))
-      res.valid := r.valid
-      res.bits.robIdx := r.bits.robIdx
-      res.bits.idxOH := 1.U << idx
-      res
+  private def selectOldest(in: Seq[Valid[Redirect]], p: Parameters): (Valid[Redirect], UInt) = {
+    val selector = Module(new SelectPolicy(in.length, true, true)(p))
+    selector.io.in.zip(in).foreach({ case (a, b) =>
+      a.valid := b.valid
+      a.bits := b.bits.robIdx
     })
-    val op = oldestSelect(_, _, idxWidth, p)
-    val selRes = ParallelOperation(selectInfo, op)
     val res = Wire(Valid(new Redirect()(p)))
-    res.valid := selRes.valid
-    res.bits := Mux1H(selRes.bits.idxOH, in.map(_.bits))
-    (res, selRes.bits.idxOH)
+    res.valid := selector.io.out.valid
+    res.bits := Mux1H(selector.io.out.bits, in.map(_.bits))
+    (res, selector.io.out.bits)
   }
 }
 
@@ -83,64 +70,80 @@ class RedirectGen(jmpRedirectNum:Int, aluRedirectNum:Int, memRedirectNum:Int)(im
     val redirectOut = Output(Valid(new Redirect))
     val memPredUpdate = Output(Valid(new MemPredUpdateReq))
   })
+  private val s1_allWb = Wire(Vec(jmpRedirectNum + aluRedirectNum + memRedirectNum, Valid(new ExuOutput)))
+  s1_allWb.zip(io.jmpWbIn ++ io.aluWbIn ++ io.memWbIn).foreach({case(s, wb) =>
+    s := DontCare
+    val redirectValidCond = wb.bits.redirectValid && !wb.bits.redirect.robIdx.needFlush(io.redirectIn)
+    s.valid := RegNext(wb.valid, false.B)
+    s.bits.redirectValid := RegNext(redirectValidCond, false.B)
+    s.bits.uop := RegEnable(wb.bits.uop, wb.valid)
+    s.bits.redirect := RegEnable(wb.bits.redirect, redirectValidCond)
+  })
+  private val s1_allRedirect = s1_allWb.map(getRedirect(_, p))
+  private val (s1_redirectSel, s1_redirectIdxOH) = selectOldest(s1_allRedirect, p)
+  private val s1_redirectValid = s1_redirectSel.valid && !s1_redirectSel.bits.robIdx.needFlush(io.redirectIn)
+  private val s1_exuOutSel = Mux1H(s1_redirectIdxOH, s1_allWb)
 
-  private val allWb = io.jmpWbIn ++ io.aluWbIn ++ io.memWbIn
-  private val allRedirect = allWb.map(getRedirect(_, p))
-  private val (redirectSel, redirectIdxOH) = selectOldestRedirect(allRedirect, p)
-  private val redirectValid = redirectSel.valid && !redirectSel.bits.robIdx.needFlush(io.redirectIn)
-  private val exuOutSel = Mux1H(redirectIdxOH, allWb)
+  private val s2_redirectValidReg = RegNext(s1_redirectValid, false.B)
+  private val s2_redirectBitsReg = RegEnable(s1_redirectSel.bits, s1_redirectValid)
+  private val s2_redirectIdxOHReg = RegEnable(s1_redirectIdxOH, s1_redirectValid)
+  private val s2_jmpTargetReg = RegEnable(s1_allWb.head.bits.redirect.cfiUpdate.target, s1_redirectValid)
+  private val s2_uopReg = RegEnable(s1_exuOutSel.bits.uop, s1_redirectValid)
+
+  private val s2_redirectValid = s2_redirectValidReg && !s2_redirectBitsReg.robIdx.needFlush(io.redirectIn)
 
   private var addrIdx = 0
-  private val isJmp = redirectIdxOH(jmpRedirectNum + addrIdx - 1, addrIdx).orR
+  private val isJmp = s2_redirectIdxOHReg(jmpRedirectNum + addrIdx - 1, addrIdx).orR
   addrIdx = addrIdx + jmpRedirectNum
-  private val isAlu = redirectIdxOH(aluRedirectNum + addrIdx - 1, addrIdx).orR
+  private val isAlu = s2_redirectIdxOHReg(aluRedirectNum + addrIdx - 1, addrIdx).orR
   addrIdx = addrIdx + aluRedirectNum
-  private val isMem = redirectIdxOH(memRedirectNum + addrIdx - 1, addrIdx).orR
+  private val isMem = s2_redirectIdxOHReg(memRedirectNum + addrIdx - 1, addrIdx).orR
   addrIdx = addrIdx + memRedirectNum
 
-  io.pcReadAddr(0) := redirectSel.bits.ftqIdx.value
-  private val s1_isJmpReg = RegEnable(isJmp, redirectValid)
-  private val s1_isMemReg = RegEnable(isMem, redirectValid)
-  private val s1_pcReadReg = RegEnable(io.pcReadData(0).getPc(redirectSel.bits.ftqOffset), redirectValid)
-  private val s1_jmpTargetReg = RegEnable(io.jmpWbIn.head.bits.redirect.cfiUpdate.target, redirectValid)
-  private val s1_imm12Reg = RegEnable(exuOutSel.bits.uop.ctrl.imm(11, 0), redirectValid)
-  private val s1_pdReg = RegEnable(exuOutSel.bits.uop.cf.pd, redirectValid)
-  private val s1_robIdxReg = RegEnable(redirectSel.bits.robIdx, redirectValid)
-  private val s1_redirectBitsReg = RegEnable(redirectSel.bits, redirectValid)
-  private val s1_redirectValidReg = RegNext(redirectValid, false.B)
+  io.pcReadAddr(0) := s2_redirectBitsReg.ftqIdx.value
 
-  private val branchTarget = s1_pcReadReg + SignExt(ImmUnion.B.toImm32(s1_imm12Reg), XLEN)
-  private val snpc = s1_pcReadReg + Mux(s1_pdReg.isRVC, 2.U, 4.U)
+  private val s3_isJmpReg = RegEnable(isJmp, s2_redirectValid)
+  private val s3_isMemReg = RegEnable(isMem, s2_redirectValid)
+  private val s3_pcReadReg = RegEnable(io.pcReadData(0).getPc(s2_redirectBitsReg.ftqOffset), s2_redirectValid)
+  private val s3_jmpTargetReg = RegEnable(s2_jmpTargetReg, s2_redirectValid)
+  private val s3_imm12Reg = RegEnable(s2_uopReg.ctrl.imm(11, 0), s2_redirectValid)
+  private val s3_pdReg = RegEnable(s2_uopReg.cf.pd, s2_redirectValid)
+  private val s3_robIdxReg = RegEnable(s2_redirectBitsReg.robIdx, s2_redirectValid)
+  private val s3_redirectBitsReg = RegEnable(s2_redirectBitsReg, s2_redirectValid)
+  private val s3_redirectValidReg = RegNext(s2_redirectValid, false.B)
+
+  private val branchTarget = s3_pcReadReg + SignExt(ImmUnion.B.toImm32(s3_imm12Reg), XLEN)
+  private val snpc = s3_pcReadReg + Mux(s3_pdReg.isRVC, 2.U, 4.U)
   private val redirectTarget = WireInit(snpc)
-  when(s1_isMemReg){
-    redirectTarget := s1_pcReadReg
-  }.elsewhen(s1_redirectBitsReg.isException || s1_redirectBitsReg.isXRet){
-    redirectTarget := s1_jmpTargetReg
-  }.elsewhen(s1_redirectBitsReg.cfiUpdate.taken){
-    redirectTarget := Mux(s1_isJmpReg, s1_jmpTargetReg, branchTarget)
+  when(s3_isMemReg){
+    redirectTarget := s3_pcReadReg
+  }.elsewhen(s3_redirectBitsReg.isException || s3_redirectBitsReg.isXRet){
+    redirectTarget := s3_jmpTargetReg
+  }.elsewhen(s3_redirectBitsReg.cfiUpdate.taken){
+    redirectTarget := Mux(s3_isJmpReg, s3_jmpTargetReg, branchTarget)
   }
-  io.redirectOut.valid := s1_redirectValidReg && !s1_robIdxReg.needFlush(io.redirectIn)
-  io.redirectOut.bits := s1_redirectBitsReg
-  io.redirectOut.bits.cfiUpdate.pc := s1_pcReadReg
-  io.redirectOut.bits.cfiUpdate.pd := s1_pdReg
+  io.redirectOut.valid := s3_redirectValidReg && !s3_robIdxReg.needFlush(io.redirectIn)
+  io.redirectOut.bits := s3_redirectBitsReg
+  io.redirectOut.bits.cfiUpdate.pc := s3_pcReadReg
+  io.redirectOut.bits.cfiUpdate.pd := s3_pdReg
   io.redirectOut.bits.cfiUpdate.target := redirectTarget
 
 
   // get pc from PcMem
   // valid only if redirect is caused by load violation
   // store_pc is used to update store set
-  io.pcReadAddr(1) := s1_redirectBitsReg.stFtqIdx.value
-  private val shouldUpdateMdp = s1_isMemReg && s1_redirectValidReg && s1_redirectBitsReg.isLoadStore
-  private val storePc = RegEnable(io.pcReadData(1).getPc(s1_redirectBitsReg.stFtqOffset), shouldUpdateMdp)
+  io.pcReadAddr(1) := s3_redirectBitsReg.stFtqIdx.value
+  private val shouldUpdateMdp = s3_isMemReg && s3_redirectValidReg && s3_redirectBitsReg.isLoadStore
+  private val storePc = RegEnable(io.pcReadData(1).getPc(s3_redirectBitsReg.stFtqOffset), shouldUpdateMdp)
 
   // update load violation predictor if load violation redirect triggered
   io.memPredUpdate.valid := RegNext(shouldUpdateMdp, init = false.B)
   // update wait table
-  io.memPredUpdate.bits.waddr := RegEnable(XORFold(s1_pcReadReg(VAddrBits - 1, 1), MemPredPCWidth), shouldUpdateMdp)
+  io.memPredUpdate.bits.waddr := RegEnable(XORFold(s3_pcReadReg(VAddrBits - 1, 1), MemPredPCWidth), shouldUpdateMdp)
   io.memPredUpdate.bits.wdata := true.B
   // update store set
-  io.memPredUpdate.bits.ldpc := RegEnable(XORFold(s1_pcReadReg(VAddrBits - 1, 1), MemPredPCWidth), shouldUpdateMdp)
-  // store pc is ready 1 cycle after s1_isReplay is judged
+  io.memPredUpdate.bits.ldpc := RegEnable(XORFold(s3_pcReadReg(VAddrBits - 1, 1), MemPredPCWidth), shouldUpdateMdp)
+  // store pc is ready 1 cycle after s3_isReplay is judged
   io.memPredUpdate.bits.stpc := XORFold(storePc(VAddrBits - 1, 1), MemPredPCWidth)
 
   XSPerfAccumulate("total_redirect_num", io.redirectOut.valid)
