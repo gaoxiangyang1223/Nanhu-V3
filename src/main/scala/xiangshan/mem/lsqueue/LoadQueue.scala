@@ -1026,7 +1026,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     }
   }
 
-  val splitNum = 5
+  val splitNum = 4
   require(LoadQueueSize % splitNum == 0)
   val needCancelCntSub = Seq.fill(splitNum)(RegInit(0.U(log2Up(LoadQueueSize).W)))
 
