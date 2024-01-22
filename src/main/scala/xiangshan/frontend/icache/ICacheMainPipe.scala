@@ -417,6 +417,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasPerfLo
   s2_ready      := (s2_valid && s2_fetch_finish && !io.respStall) || (!s2_valid && s2_miss_available)
   s2_fire       := s2_valid && s2_fetch_finish && !io.respStall
 
+  val s2_flush_latch = holdReleaseLatch(valid = io.flush && s2_valid,    release = s2_fire,      flush = false.B)
   /** s2 data */
   val mmio = RegEnable(VecInit(fromPMP.map(port => port.mmio)),s1_fire)  // TODO: handle it
 
@@ -752,13 +753,20 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasPerfLo
 
 
       when(s2_fire && missStateQueue(j)(i) === m_refilled){
-        missStateQueue(j)(i)     := m_wait_sec_miss
+        when(s2_flush_latch) {
+          missStateQueue(j)(i)   := m_invalid
+        }.otherwise {
+          missStateQueue(j)(i)     := m_wait_sec_miss
+        }
       }
 
       /*** Only the first cycle to check whether meet the secondary miss ***/
       when(missStateQueue(j)(i) === m_wait_sec_miss){
         /*** The seondary req has been fix by this slot and another also hit || the secondary req for other cacheline and hit ***/
-        when(s2_fire) {
+        when(io.flush) {
+          missStateQueue(j)(i)     := m_invalid
+        }
+        .elsewhen(s2_fire) {
           missStateQueue(j)(i)     := m_invalid
         }
         /*** The seondary req has been fix by this slot but another miss/f3 not ready || the seondary req for other cacheline and miss ***/
@@ -821,8 +829,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasPerfLo
   /** response to IFU */
 
   (0 until PortNumber).map{ i =>
-    if(i ==0) toIFU(i).valid          := s2_fire
-       else   toIFU(i).valid          := s2_fire && s2_double_line
+    if(i ==0) toIFU(i).valid          := s2_fire && !s2_flush_latch
+       else   toIFU(i).valid          := s2_fire && !s2_flush_latch && s2_double_line
     //when select is high, use sramData. Otherwise, use registerData.
     toIFU(i).bits.registerData  := s2_register_datas(i)
     toIFU(i).bits.sramData  := s2_hit_datas(i)
